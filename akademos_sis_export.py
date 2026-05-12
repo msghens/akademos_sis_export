@@ -190,10 +190,29 @@ for period in academicPeriodIterator:
   # pprint(period.dict)
   # print(cur, "period", period.dict)
   if check_date_range(period.dict['startOn'], period.dict['endOn']):
-    print("Term is within 9 months in the past and 6 months in the future")
+    # print("Term is within 9 months in the past and 9 months in the future")
     print(f"{cur} period, Term: {period.dict['code']}, Startdate {period.dict['startOn']}, Enddate {period.dict['endOn']}, Registration {period.dict['registration']}")
     terms[period.dict['code']] = {"startOn": period.dict['startOn'], "endOn": period.dict['endOn'], "registration": period.dict['registration']}
 
-  
+
+# prep terms for csv export
+term_list = []  
+for code, details in terms.items():
+    term_list.append({
+        "term_code": code,
+        "start_date": details["startOn"].split('T')[0],
+        "end_date": details["endOn"].split('T')[0]
+    })
+# sort term list by start date
+term_list.sort(key=lambda x: x["start_date"]) 
+try:
+    final_path = create_csv_from_dict_list(term_list, "terms")
+    print(f"Successfully created CSV at: {final_path}")
+except ValueError as e:
+    print(f"Error: {e}")  
+
+# Create user file list
+
+
 
 print("End")
