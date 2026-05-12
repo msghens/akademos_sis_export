@@ -169,8 +169,8 @@ params = {}
   
 
 params["criteria"] = "{\"category\":{\"type\":\"term\"}}"
-params["limit"] = 3
-params["offset"] = 0
+# params["limit"] = 3
+# params["offset"] = 0
 academicPeriodIterator = ethosClient.getResourceIterator(
   loginSession=loginSession,
   resourceName="academic-periods",
@@ -188,11 +188,15 @@ terms = dict()
 for period in academicPeriodIterator:
   cur += 1
   # pprint(period.dict)
-  # print(cur, "period", period.dict)
-  if check_date_range(period.dict['startOn'], period.dict['endOn']):
+  
+  period_dict = period.dict
+  if period_dict is None:
+    continue
+  if check_date_range(period_dict['startOn'], period_dict['endOn']):
     # print("Term is within 9 months in the past and 9 months in the future")
-    print(f"{cur} period, Term: {period.dict['code']}, Startdate {period.dict['startOn']}, Enddate {period.dict['endOn']}, Registration {period.dict['registration']}")
-    terms[period.dict['code']] = {"startOn": period.dict['startOn'], "endOn": period.dict['endOn'], "registration": period.dict['registration']}
+    print(cur, "period", period.dict)
+    print(f"{cur} period, Term: {period_dict['code']}, Startdate {period_dict['startOn']}, Enddate {period_dict['endOn']}, Registration {period_dict['registration']}")
+    terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration']}
 
 
 # prep terms for csv export
@@ -211,8 +215,35 @@ try:
 except ValueError as e:
     print(f"Error: {e}")  
 
-# Create user file list
 
 
+# Create Course file
+
+# coursesIterator = ethosClient.getResourceIterator(
+#   loginSession=loginSession,
+#   resourceName="courses",
+#   version=None,
+#   params=None,
+#   pageSize=100
+# )
+
+
+
+params["criteria"] = "{\"academicPeriod\":{\"id\":\"e3a4dc20-77d0-4727-a438-5147b6cb23d2\"}}"
+sectionsIterator = ethosClient.getResourceIterator(
+  loginSession=loginSession,
+  resourceName="sections",
+  version=None,
+  params=params,
+  pageSize=100
+)
+
+
+
+for sections in sectionsIterator:
+  sections_dict = sections.dict
+  if sections_dict is None:
+    continue
+  print(sections_dict)
 
 print("End")
