@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import csv
 import datetime
-from typing import List, Dict, Any,Union
+from typing import List, Dict, Any,Union,Optional
 import datetime
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
@@ -85,21 +85,40 @@ def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str)
         print(f"An error occurred while writing the CSV file: {e}")
         raise
 
-# --- Example Usage (Mock data) ---
-# mock_data = [
-#     {'id': 1, 'name': 'Alice', 'score': 95.5},
-#     {'id': 2, 'name': 'Bob', 'score': 88.0},
-#     {'id': 3, 'name': 'Charlie', 'score': 79.2}
-# ]
-# try:
-#     final_path = create_csv_from_dict_list(mock_data, "user_scores")
-#     print(f"Successfully created CSV at: {final_path}")
-# except ValueError as e:
-#     print(f"Error: {e}")
-# except Exception as e:
-#     print(f"Process failed: {e}")
 
 
+def find_greater(a: Optional[Union[int, float]], 
+                  b: Optional[Union[int, float]]) -> Optional[Union[int, float]]:
+    """
+    Compares two inputs (which can be numbers or None) and returns the 
+    greater numerical value.
+
+    Args:
+        a: The first number (or None).
+        b: The second number (or None).
+
+    Returns:
+        The greater number if both are valid, the single number if one is None,
+        or None if both are None.
+    """
+    
+    # 1. Check if both are None
+    if a is None and b is None:
+        return None
+        
+    # 2. Check if only 'a' is None
+    if a is None:
+        # Since 'b' must be a number (checked in step 1), we return b.
+        return b
+        
+    # 3. Check if only 'b' is None
+    if b is None:
+        # Since 'a' must be a number, we return a.
+        return a
+        
+    # 4. Both are guaranteed to be valid numbers (int or float)
+    # Use the built-in max() function for the final comparison.
+    return max(a, b)
 
 
 def check_date_range(begin_date_str: str, end_date_str: str) -> bool:
@@ -152,22 +171,41 @@ def check_date_range(begin_date_str: str, end_date_str: str) -> bool:
 
     return is_start_valid and is_end_valid
 
+
+# Helper functions to get course and subject details
+# TODO: These could be optimized with caching if we find that we are making repeated calls for the same course or subject IDs. For now, we will keep it simple and make direct API calls.
+def get_course(course_id: str)-> dict:
+    course = ethosClient.getResource(
+        loginSession=loginSession,
+        resourceName="courses",
+        version=None,
+        resourceID=course_id
+    )
+    if course:
+        result = course.dict
+        return result if result is not None else {}
+    return {}
+
+# Helper function to get subject details
+# TODO: These could be optimized with caching if we find that we are making repeated calls for the same course or subject IDs. For now, we will keep it simple and make direct API calls.
+def get_subject(subject_id: str)-> dict:
+    subject = ethosClient.getResource(
+        loginSession=loginSession,
+        resourceName="subjects",
+        version=None,
+        resourceID=subject_id
+    )
+    if subject:
+        result = subject.dict
+        return result if result is not None else {}
+    return {}
+
+
 print("Start")
 
-# def isYes(str):
-#   pro = userInput.strip().upper()
-#   if len(pro)<1:
-    # return False
-#   return pro[0]=="Y"
+
 
 params = {}
-# userInput = input("Do you want to restrict to periods with open registration? (Y/N)")
-
-# if isYes(userInput):
-#   print("Restricting results where registration is open")
-#   params["criteria"] = "{\"registration\":\"open\"}"
-  
-
 params["criteria"] = "{\"category\":{\"type\":\"term\"}}"
 # params["limit"] = 3
 # params["offset"] = 0
@@ -178,8 +216,6 @@ academicPeriodIterator = ethosClient.getResourceIterator(
   params=params,
   pageSize=25
 )
-
-
 
 #Get Terms
 cur = 0
@@ -194,9 +230,9 @@ for period in academicPeriodIterator:
     continue
   if check_date_range(period_dict['startOn'], period_dict['endOn']):
     # print("Term is within 9 months in the past and 9 months in the future")
-    # print(cur, "period", period.dict)
+    print(cur, "period", period.dict)
     print(f"{cur} period, Term: {period_dict['code']}, Startdate {period_dict['startOn']}, Enddate {period_dict['endOn']}, Registration {period_dict['registration']}")
-    terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id']}
+    terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id'], "title": period_dict['title']}
 
 
 # prep terms for csv export
@@ -214,18 +250,6 @@ try:
     print(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
     print(f"Error: {e}")  
-
-
-
-# Create Course file
-
-# coursesIterator = ethosClient.getResourceIterator(
-#   loginSession=loginSession,
-#   resourceName="courses",
-#   version=None,
-#   params=None,
-#   pageSize=100
-# )
 
 
 #Pref for file writing
@@ -247,7 +271,42 @@ for code, details in terms.items():
         if sections_dict is None:
             continue
         number_of_sections += 1
-        print(sections_dict)
+        # print(sections_dict['course']['id'])
+        # pprint(sections_dict)
+        course_dict = get_course(sections_dict['course']['id'])
+        subject_dict = get_subject(course_dict['subject']['id'])
+        # pprint(subject_dict)
+        # pprint(course_dict)
+        # pprint(course_dict['credits'])
+        course_credit = find_greater(course_dict['credits'][0]['minimum'], course_dict['credits'][0]['maximum'])
+        sections_list.append({
+            "course_number": course_dict['number'],
+            "course_title": course_dict['title'],
+            "course_name": subject_dict['abbreviation'],
+            "course_code": sections_dict['code'],
+            "course_section": None,
+            "course_id": sections_dict['course']['id'],
+            "course_credit": course_credit,
+            "department_code":  subject_dict['abbreviation'],
+            "department_description": subject_dict['title'],
+            "campus_code": "TBD", #to be coded later for man, online,etc
+            "campus_desc": "TBD", #to be coded later
+            "term_code": code,
+            "term_desc": details["title"],
+            "session_code": None, #to be coded later if needed,
+            "start_date": sections_dict["startOn"].split('T')[0],
+            "end_date": sections_dict["endOn"].split('T')[0],
+            "enrollment_max": sections_dict['maxEnrollment']           
+        })
+        print(number_of_sections)
+
+
+
+try:
+    final_path = create_csv_from_dict_list(sections_list, "course")
+    print(f"Successfully created CSV at: {final_path}")
+except ValueError as e:
+    print(f"Error: {e}")  
 
 print(f"Number of sections: {number_of_sections}")
 print("End")
