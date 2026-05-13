@@ -194,9 +194,9 @@ for period in academicPeriodIterator:
     continue
   if check_date_range(period_dict['startOn'], period_dict['endOn']):
     # print("Term is within 9 months in the past and 9 months in the future")
-    print(cur, "period", period.dict)
+    # print(cur, "period", period.dict)
     print(f"{cur} period, Term: {period_dict['code']}, Startdate {period_dict['startOn']}, Enddate {period_dict['endOn']}, Registration {period_dict['registration']}")
-    terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration']}
+    terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id']}
 
 
 # prep terms for csv export
@@ -228,22 +228,26 @@ except ValueError as e:
 # )
 
 
+#Pref for file writing
+sections_list = []
+number_of_sections = 0
+for code, details in terms.items():
+    
+    params["criteria"] = "{\"academicPeriod\":{\"id\":\"" + details["id"] + "\"},\"status\":\"open\"}"
+    sectionsIterator = ethosClient.getResourceIterator(
 
-params["criteria"] = "{\"academicPeriod\":{\"id\":\"e3a4dc20-77d0-4727-a438-5147b6cb23d2\"}}"
-sectionsIterator = ethosClient.getResourceIterator(
-  loginSession=loginSession,
-  resourceName="sections",
-  version=None,
-  params=params,
-  pageSize=100
-)
+    loginSession=loginSession,
+    resourceName="sections",
+    version=None,
+    params=params,
+    pageSize=100
+    )
+    for sections in sectionsIterator:
+        sections_dict = sections.dict
+        if sections_dict is None:
+            continue
+        number_of_sections += 1
+        print(sections_dict)
 
-
-
-for sections in sectionsIterator:
-  sections_dict = sections.dict
-  if sections_dict is None:
-    continue
-  print(sections_dict)
-
+print(f"Number of sections: {number_of_sections}")
 print("End")
