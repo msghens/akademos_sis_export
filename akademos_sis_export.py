@@ -16,13 +16,61 @@ from dateutil.relativedelta import relativedelta
 import EllucianEthosPythonClient
 load_dotenv()
 
+# Global variables
+courseCache = {}
+subjectCache = {}
+
+
+# Global variables for Ethos API access
 ethosBaseURL = os.environ["ETHOSBASEURL"]
 ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
 
-
+# Initialize the Ethos API client and obtain a login session using the API key
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
 loginSession = ethosClient.getLoginSessionFromAPIKey(apiKey=ethosAppAPIKey)
 
+
+
+
+def get_start_date() -> str:
+    """
+    Calculates the date exactly six months prior to the current date 
+    and returns it in the required ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ).
+    
+    The time component is explicitly set to 00:00:00 UTC on the calculated date.
+    """
+    # Use the current moment in UTC for calculation
+    current_utc_time = datetime.datetime.now(datetime.timezone.utc)
+    
+    # Subtract exactly 6 calendar months using relativedelta
+    date_six_months_ago = current_utc_time - relativedelta(months=6)
+    
+    # Normalize the time to midnight (00:00:00) UTC
+    # This discards any current hours, minutes, etc.
+    start_of_day_utc = date_six_months_ago.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Format the date string as YYYY-MM-DDTHH:MM:SS and manually append 'Z'
+    return start_of_day_utc.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+
+def get_end_date() -> str:
+    """
+    Calculates the date exactly two  months later to the current date 
+    and returns it in the required ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ).
+    
+    The time component is explicitly set to 00:00:00 UTC on the calculated date.
+    """
+    # Use the current moment in UTC for calculation
+    current_utc_time = datetime.datetime.now(datetime.timezone.utc)
+    
+    # Subtract exactly 6 calendar months using relativedelta
+    date_six_months_ago = current_utc_time + relativedelta(months=2)
+    
+    # Normalize the time to midnight (00:00:00) UTC
+    # This discards any current hours, minutes, etc.
+    start_of_day_utc = date_six_months_ago.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Format the date string as YYYY-MM-DDTHH:MM:SS and manually append 'Z'
+    return start_of_day_utc.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
 
 def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str) -> Path:
     """
@@ -175,6 +223,8 @@ def check_date_range(begin_date_str: str, end_date_str: str) -> bool:
 # Helper functions to get course and subject details
 # TODO: These could be optimized with caching if we find that we are making repeated calls for the same course or subject IDs. For now, we will keep it simple and make direct API calls.
 def get_course(course_id: str)-> dict:
+    if course_id in courseCache:
+        return courseCache[course_id]
     course = ethosClient.getResource(
         loginSession=loginSession,
         resourceName="courses",
@@ -183,12 +233,15 @@ def get_course(course_id: str)-> dict:
     )
     if course:
         result = course.dict
+        courseCache[course_id] = result
         return result if result is not None else {}
     return {}
 
 # Helper function to get subject details
 # TODO: These could be optimized with caching if we find that we are making repeated calls for the same course or subject IDs. For now, we will keep it simple and make direct API calls.
 def get_subject(subject_id: str)-> dict:
+    if subject_id in subjectCache:
+        return subjectCache[subject_id]
     subject = ethosClient.getResource(
         loginSession=loginSession,
         resourceName="subjects",
@@ -197,6 +250,7 @@ def get_subject(subject_id: str)-> dict:
     )
     if subject:
         result = subject.dict
+        subjectCache[subject_id] = result
         return result if result is not None else {}
     return {}
 
@@ -206,7 +260,12 @@ print("Start")
 
 
 params = {}
-params["criteria"] = "{\"category\":{\"type\":\"term\"}}"
+# We will use the start and end date to limit the number of terms we have to deal with for now. We can expand this later if needed.
+# TODO: add starton and endon to the criteria to limit the number of terms we have to deal with for now. We can expand this later if needed.
+# starton and endon throw an error when added to the criteria, so we will filter the terms after we get them back from the API. This is not ideal, but it works for now. We can revisit this later if needed.
+startOn = get_start_date()
+endOn = get_end_date()
+params["criteria"] = '{"category":{"type":"term"}}'
 # params["limit"] = 3
 # params["offset"] = 0
 academicPeriodIterator = ethosClient.getResourceIterator(
@@ -214,7 +273,7 @@ academicPeriodIterator = ethosClient.getResourceIterator(
   resourceName="academic-periods",
   version=None,
   params=params,
-  pageSize=25
+  pageSize=100
 )
 
 #Get Terms
@@ -223,7 +282,7 @@ cur = 0
 terms = dict()
 for period in academicPeriodIterator:
   cur += 1
-  # pprint(period.dict)
+  pprint(period.dict)
   
   period_dict = period.dict
   if period_dict is None:
@@ -285,10 +344,10 @@ for code, details in terms.items():
             "course_name": subject_dict['abbreviation'],
             "course_code": sections_dict['code'],
             "course_section": None,
-            "course_id": sections_dict['course']['id'],
             "course_credit": course_credit,
+            "course_model": None, #to be coded later if needed
             "department_code":  subject_dict['abbreviation'],
-            "department_description": subject_dict['title'],
+            "department_desc": subject_dict['title'],
             "campus_code": "TBD", #to be coded later for man, online,etc
             "campus_desc": "TBD", #to be coded later
             "term_code": code,
@@ -296,9 +355,11 @@ for code, details in terms.items():
             "session_code": None, #to be coded later if needed,
             "start_date": sections_dict["startOn"].split('T')[0],
             "end_date": sections_dict["endOn"].split('T')[0],
-            "enrollment_max": sections_dict['maxEnrollment']           
+            "enrollment_cap": sections_dict['maxEnrollment']           
         })
-        print(number_of_sections)
+        print( sections_dict['guid'], "course_number:", course_dict['number'], "course_title:", course_dict['title'], "course_name:", subject_dict['abbreviation'], "course_code:", sections_dict['code'], "term_code:", code, "term_desc:", details["title"], "start_date:", sections_dict["startOn"].split('T')[0], "end_date:", sections_dict["endOn"].split('T')[0], "enrollment_cap:", sections_dict['maxEnrollment'])
+
+
 
 
 
@@ -309,4 +370,57 @@ except ValueError as e:
     print(f"Error: {e}")  
 
 print(f"Number of sections: {number_of_sections}")
+
+# create user csv 
+#start with instuctor first.
+# create a list of instructors to be exported to a CSV
+instructors_list = []
+for code, details in terms.items():
+    params["criteria"] = "{\"academicPeriod\":{\"id\":\"" + details["id"] + "\"},\"status\":\"open\"}"
+    sectionsIterator = ethosClient.getResourceIterator(
+        loginSession=loginSession,
+        resourceName="sections",
+        version=None,
+        params=params,
+        pageSize=100
+    )
+    for sections in sectionsIterator:
+        sections_dict = sections.dict
+        if sections_dict is None:
+            continue
+        # Get section instructors
+        params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
+        instructorIterator = ethosClient.getResourceIterator(
+            loginSession=loginSession,
+            resourceName="section-instructors",
+            version="10",
+            params=params
+        )
+        for instructor in instructorIterator:
+            personResourceID = instructor.dict.get('instructor', {}).get('id')
+            if personResourceID:
+                person = ethosClient.getResource(
+                    loginSession=loginSession,
+                    resourceName="persons",
+                    resourceID=personResourceID,
+                    version=None
+                )
+                if person:
+                    instructors_list.append({
+                        "instructor_id": personResourceID,
+                        "instructor_name": person.dict["names"][0]["fullName"],
+                        "term_code": code,
+                        "term_desc": details["title"]
+                    })
+
+try:
+    final_path = create_csv_from_dict_list(instructors_list, "instructors")
+    print(f"Successfully created CSV at: {final_path}")
+except ValueError as e:
+    print(f"Error: {e}")
+
+for  instructor in instructors_list:
+    print(instructor)
+
+
 print("End")
