@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 from pprint import pprint
 from dotenv import load_dotenv
 from pathlib import Path
@@ -10,6 +11,10 @@ import datetime
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
 
+# Start timer
+start_time = time.time()
+
+### Akademos SIS Export
 
 # This sample uses a resource iterator to list all the academic periods
 
@@ -17,8 +22,11 @@ import EllucianEthosPythonClient
 load_dotenv()
 
 # Global variables
+
+# Cache for storing frequently accessed resources to avoid repeated API calls
 courseCache = {}
 subjectCache = {}
+personCache = {}
 
 
 # Global variables for Ethos API access
@@ -30,7 +38,30 @@ ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBase
 loginSession = ethosClient.getLoginSessionFromAPIKey(apiKey=ethosAppAPIKey)
 
 
+def format_runtime(seconds: float) -> str:
+    """
+    Convert runtime in seconds to a human-readable string.
+    Handles hours, minutes, seconds, and milliseconds.
+    """
+    if seconds < 0:
+        return "Invalid runtime"
 
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds - int(seconds)) * 1000)
+
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if secs > 0:
+        parts.append(f"{secs}s")
+    if millis > 0 and hours == 0:  # Show ms only if runtime < 1h
+        parts.append(f"{millis}ms")
+
+    return " ".join(parts) if parts else "0s"
 
 def get_start_date() -> str:
     """
@@ -255,6 +286,35 @@ def get_subject(subject_id: str)-> dict:
     return {}
 
 
+# Helper function to get person details
+# Cache for storing person details to avoid repeated API calls
+def get_person(person_id: str)-> dict:
+    if person_id in personCache:
+        return personCache[person_id]
+    person = ethosClient.getResource(
+        loginSession=loginSession,
+        resourceName="persons",
+        version=None,
+        resourceID=person_id
+    )
+    if person:
+        result = person.dict
+        personCache[person_id] = result
+        return result if result is not None else {}
+    return {}
+
+def get_banner_id(person: dict) -> str:
+    for credential in person.get('credentials', []):
+        if credential.get('type') == 'bannerId':
+            return credential.get('value').strip()[:50]
+    return None # type: ignore
+
+def get_banner_username(person: dict) -> str:
+    for credential in person.get('credentials', []):
+        if credential.get('type') == 'bannerUserName':
+            return credential.get('value').strip()[:50]
+    return None # type: ignore
+
 print("Start")
 
 
@@ -298,7 +358,7 @@ for period in academicPeriodIterator:
 term_list = []  
 for code, details in terms.items():
     term_list.append({
-        "term_code": code,
+        "term_code": code.strip()[:20],
         "start_date": details["startOn"].split('T')[0],
         "end_date": details["endOn"].split('T')[0]
     })
@@ -312,7 +372,10 @@ except ValueError as e:
 
 
 #Pref for file writing
+# Prepare a list to store all sections
 sections_list = []
+sections_raw_list = []
+# Initialize a counter for the number of sections
 number_of_sections = 0
 for code, details in terms.items():
     
@@ -326,6 +389,9 @@ for code, details in terms.items():
     pageSize=100
     )
     for sections in sectionsIterator:
+        sections_raw = sections
+        sections_raw.dict['code'] = code # type: ignore
+        sections_raw_list.append(sections_raw)
         sections_dict = sections.dict
         if sections_dict is None:
             continue
@@ -339,30 +405,28 @@ for code, details in terms.items():
         # pprint(course_dict['credits'])
         course_credit = find_greater(course_dict['credits'][0]['minimum'], course_dict['credits'][0]['maximum'])
         sections_list.append({
-            "course_number": course_dict['number'],
-            "course_title": course_dict['title'],
-            "course_name": subject_dict['abbreviation'],
-            "course_code": sections_dict['code'],
+            "course_number": course_dict['number'].strip()[:100],
+            "course_title": course_dict['title'].strip()[:100],
+            "course_name": subject_dict['abbreviation'].strip()[:60],
+            "course_code": sections_dict['code'].strip()[:60],
             "course_section": None,
-            "course_credit": course_credit,
-            "course_model": None, #to be coded later if needed
-            "department_code":  subject_dict['abbreviation'],
-            "department_desc": subject_dict['title'],
+            "course_credit": int(str(course_credit)[:3] if str(course_credit) else 0),
+            "course_model": None, #to be coded later if needed Designate courses in a particular program (e.g. EA). Required for Equitable Access clients
+            "department_code":  subject_dict['abbreviation'].strip()[:20],
+            "department_desc": subject_dict['title'].strip()[:150],
             "campus_code": "TBD", #to be coded later for man, online,etc
             "campus_desc": "TBD", #to be coded later
-            "term_code": code,
-            "term_desc": details["title"],
+            "term_code": code.strip()[:20],
+            "term_desc": terms[code]["title"].strip()[:150],
             "session_code": None, #to be coded later if needed,
             "start_date": sections_dict["startOn"].split('T')[0],
             "end_date": sections_dict["endOn"].split('T')[0],
-            "enrollment_cap": sections_dict['maxEnrollment']           
+            "enrollment_cap": int(str(sections_dict['maxEnrollment'])[:4] if str(sections_dict['maxEnrollment']) else 0)
         })
-        print( sections_dict['guid'], "course_number:", course_dict['number'], "course_title:", course_dict['title'], "course_name:", subject_dict['abbreviation'], "course_code:", sections_dict['code'], "term_code:", code, "term_desc:", details["title"], "start_date:", sections_dict["startOn"].split('T')[0], "end_date:", sections_dict["endOn"].split('T')[0], "enrollment_cap:", sections_dict['maxEnrollment'])
-
-
-
-
-
+        print( sections_dict['guid'], "course_number:", course_dict['number'], "course_title:", course_dict['title'], "course_name:", subject_dict['abbreviation'], "course_code:", sections_dict['code'], "term_code:", code, "term_desc:", terms[code]["title"], "start_date:", sections_dict["startOn"].split('T')[0], "end_date:", sections_dict["endOn"].split('T')[0], "enrollment_cap:", sections_dict['maxEnrollment'])
+        # Break if we've reached the limit. For testing purposes, we'll limit to 10 sections
+        # if number_of_sections > 10:
+        #     break
 try:
     final_path = create_csv_from_dict_list(sections_list, "course")
     print(f"Successfully created CSV at: {final_path}")
@@ -373,54 +437,72 @@ print(f"Number of sections: {number_of_sections}")
 
 # create user csv 
 #start with instuctor first.
-# create a list of instructors to be exported to a CSV
-instructors_list = []
-for code, details in terms.items():
-    params["criteria"] = "{\"academicPeriod\":{\"id\":\"" + details["id"] + "\"},\"status\":\"open\"}"
-    sectionsIterator = ethosClient.getResourceIterator(
+# create a list of instructors to be exported to a users CSV
+user_list = []
+for sections in sections_raw_list:
+    sections_dict = sections.dict
+    if sections_dict is None:
+        continue
+    course_dict = get_course(sections_dict['course']['id'])
+    subject_dict = get_subject(course_dict['subject']['id'])    
+    # Get section instructors
+    params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
+    instructorIterator = ethosClient.getResourceIterator(
         loginSession=loginSession,
-        resourceName="sections",
-        version=None,
-        params=params,
-        pageSize=100
+        resourceName="section-instructors",
+        version="10",
+        params=params
     )
-    for sections in sectionsIterator:
-        sections_dict = sections.dict
-        if sections_dict is None:
-            continue
-        # Get section instructors
-        params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
-        instructorIterator = ethosClient.getResourceIterator(
-            loginSession=loginSession,
-            resourceName="section-instructors",
-            version="10",
-            params=params
-        )
-        for instructor in instructorIterator:
-            personResourceID = instructor.dict.get('instructor', {}).get('id')
-            if personResourceID:
-                person = ethosClient.getResource(
-                    loginSession=loginSession,
-                    resourceName="persons",
-                    resourceID=personResourceID,
-                    version=None
-                )
-                if person:
-                    instructors_list.append({
-                        "instructor_id": personResourceID,
-                        "instructor_name": person.dict["names"][0]["fullName"],
-                        "term_code": code,
-                        "term_desc": details["title"]
-                    })
+    for instructor in instructorIterator:
+        personResourceID = instructor.dict.get('instructor', {}).get('id') # type: ignore
+        if personResourceID:
+            person = get_person(personResourceID)
+            if person:
+                pprint(person)
+                user_list.append({
+                    "id": get_banner_id(person),
+                    "role": "professor",
+                    "first_name": person['names'][0]['firstName'].strip()[:150],
+                    "last_name": person['names'][0]['lastName'].strip()[:150],
+                    "email": person['emails'][0]['address'].strip()[:150] if person['emails'] else None,
+                    "phone_number": None,
+                    "address_line1": None,
+                    "city": None,
+                    "state": None,
+                    "postal_code": None,
+                    "student_major": None,
+                    "student_grade_level": None,
+                    "course_number": course_dict['number'].strip()[:100],
+                    "term_code": sections_dict['code'].strip()[:20],
+                    "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
+                    "username": get_banner_username(person)
+                })
+                print(f"User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+
+
+
+
+
+
+
+
+
+
+     
 
 try:
-    final_path = create_csv_from_dict_list(instructors_list, "instructors")
+    final_path = create_csv_from_dict_list(user_list, "user")
     print(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
     print(f"Error: {e}")
 
-for  instructor in instructors_list:
-    print(instructor)
+for  user in user_list:
+    print(user)
 
+# End timer
+end_time = time.time()
 
+# Calculate and display runtime
+elapsed = end_time - start_time
+print(f"Runtime: {format_runtime(elapsed)}")
 print("End")
