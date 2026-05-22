@@ -410,7 +410,7 @@ for code, details in terms.items():
             "course_name": subject_dict['abbreviation'].strip()[:60],
             "course_code": sections_dict['code'].strip()[:60],
             "course_section": None,
-            "course_credit": int(str(course_credit)[:3] if str(course_credit) else 0),
+            "course_credit": str(course_credit)[:3] if course_credit else "0",
             "course_model": None, #to be coded later if needed Designate courses in a particular program (e.g. EA). Required for Equitable Access clients
             "department_code":  subject_dict['abbreviation'].strip()[:20],
             "department_desc": subject_dict['title'].strip()[:150],

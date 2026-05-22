@@ -16,7 +16,7 @@ dependencies = [
 requires-dist = [
     { name = "ellucianethospythonclient", specifier = ">=0.2" },
     { name = "python-dateutil", specifier = ">=2.8.1" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "python-dotenv", specifier = ">=1.2" },
 ]
 
 [[package]]
