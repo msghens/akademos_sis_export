@@ -3,6 +3,7 @@
 __pycache__/
 /data/
 /.vscode
+work.py
 
 
 # Byte-compiled / optimized / DLL files
