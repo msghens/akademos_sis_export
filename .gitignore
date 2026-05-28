@@ -3,12 +3,8 @@
 __pycache__/
 /data/
 /.vscode
-
-/.venv
-/.env
-__pycache__/
-/data/
-/.vscode
+work.py
+akademos_sis_export_opt.py
 
 
 # Byte-compiled / optimized / DLL files
