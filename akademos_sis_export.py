@@ -7,9 +7,15 @@ from pathlib import Path
 import csv
 import datetime
 from typing import List, Dict, Any,Union,Optional
-import datetime
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
+
+
+# TODO: 
+# - Add error handling and logging
+# - Download all courses by Administrative Period 
+# 
+
 
 # Start timer
 start_time = time.time()
@@ -24,9 +30,10 @@ load_dotenv()
 # Global variables
 
 # Cache for storing frequently accessed resources to avoid repeated API calls
-courseCache = {}
-subjectCache = {}
-personCache = {}
+# Global variables
+courseCache: Dict[str, dict] = {}
+subjectCache: Dict[str, dict] = {}
+personCache: Dict[str, dict] = {}
 
 
 # Global variables for Ethos API access
@@ -263,9 +270,9 @@ def get_course(course_id: str)-> dict:
         resourceID=course_id
     )
     if course:
-        result = course.dict
+        result = course.dict or {}
         courseCache[course_id] = result
-        return result if result is not None else {}
+        return result
     return {}
 
 # Helper function to get subject details
@@ -281,8 +288,10 @@ def get_subject(subject_id: str)-> dict:
     )
     if subject:
         result = subject.dict
+        if result is None:
+            result = {}
         subjectCache[subject_id] = result
-        return result if result is not None else {}
+        return result
     return {}
 
 
@@ -299,7 +308,8 @@ def get_person(person_id: str)-> dict:
     )
     if person:
         result = person.dict
-        personCache[person_id] = result
+        if result is not None:
+            personCache[person_id] = result
         return result if result is not None else {}
     return {}
 
@@ -386,7 +396,7 @@ for code, details in terms.items():
     resourceName="sections",
     version=None,
     params=params,
-    pageSize=100
+    pageSize=500
     )
     for sections in sectionsIterator:
         sections_raw = sections
@@ -439,6 +449,7 @@ print(f"Number of sections: {number_of_sections}")
 #start with instuctor first.
 # create a list of instructors to be exported to a users CSV
 user_list = []
+personCounter = 0;
 for sections in sections_raw_list:
     sections_dict = sections.dict
     if sections_dict is None:
@@ -453,6 +464,7 @@ for sections in sections_raw_list:
         version="10",
         params=params
     )
+    
     for instructor in instructorIterator:
         personResourceID = instructor.dict.get('instructor', {}).get('id') # type: ignore
         if personResourceID:
@@ -467,6 +479,7 @@ for sections in sections_raw_list:
                     "email": person['emails'][0]['address'].strip()[:150] if person['emails'] else None,
                     "phone_number": None,
                     "address_line1": None,
+                    "address_line_2": None,
                     "city": None,
                     "state": None,
                     "postal_code": None,
@@ -477,7 +490,48 @@ for sections in sections_raw_list:
                     "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
-                print(f"User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+                personCounter += 1
+                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+    # Get section enrollments
+    params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
+    enrollmentIterator = ethosClient.getResourceIterator(
+        loginSession=loginSession,
+        resourceName="section-registrations",
+        version="16",
+        params=params
+    )
+    for enrollment in enrollmentIterator:
+        enrollment_dict = enrollment.dict
+        if enrollment_dict is None:
+            continue
+        personResourceID = enrollment_dict.get('student', {}).get('id')
+        if personResourceID:
+            person = get_person(personResourceID)
+            if person:
+                pprint(person)
+                user_list.append({
+                    "id": get_banner_id(person),
+                    "role": "student",
+                    "first_name": person['names'][0]['firstName'].strip()[:150],
+                    "last_name": person['names'][0]['lastName'].strip()[:150],
+                    "email": person['emails'][0]['address'].strip()[:150] if person['emails'] else None,
+                    "phone_number": None,
+                    "address_line1": "Santa Barbara City College", #to be coded later for actual address if needed
+                    "address_line_2": "721 Cliff Drive", #to be coded later for actual address if needed
+                    "city": "Santa Barbara",
+                    "state": "CA",
+                    "postal_code": "93109",
+                    "student_major": None, #to be coded later if needed
+                    "student_grade_level": "unclassified", #to be coded later if needed
+                    "course_number": course_dict['number'].strip()[:100],
+                    "term_code": sections_dict['code'].strip()[:20],
+                    "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
+                    "username": get_banner_username(person)
+                })
+                personCounter += 1
+                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+    
+
 
 
 
