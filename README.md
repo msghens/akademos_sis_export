@@ -8,4 +8,4 @@
 
 Python script to extract Banner SIS data to export to Akademos/Vitalsource
 
-Python script to extract Banner SIS data to export to Akademos/Vitalsource.
+
