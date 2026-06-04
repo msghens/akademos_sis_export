@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 [project]
 name = "akademos-sis-export"
 version = "0.1.0"
@@ -6,4 +7,14 @@ dependencies = [
     "ellucianethospythonclient>=0.2",
     "python-dateutil>=2.8.1",
     "python-dotenv>=1.2"
+=======
+[project]
+name = "akademos-sis-export"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "ellucianethospythonclient>=0.2",
+    "python-dateutil>=2.8.1",
+    "python-dotenv>=1.2"
+>>>>>>> 00dc6aff3af7228d4a966de450232ac3d39ace1a
 ]
