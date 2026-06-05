@@ -14,7 +14,8 @@ from dateutil.relativedelta import relativedelta
 # TODO: 
 # - Add error handling and logging
 # - Download all courses by Administrative Period 
-# 
+# NOTES:
+# - Email use username maildomain or fine sbcc -Akademos Wants college emails
 
 
 # Start timer
@@ -333,9 +334,10 @@ params = {}
 # We will use the start and end date to limit the number of terms we have to deal with for now. We can expand this later if needed.
 # TODO: add starton and endon to the criteria to limit the number of terms we have to deal with for now. We can expand this later if needed.
 # starton and endon throw an error when added to the criteria, so we will filter the terms after we get them back from the API. This is not ideal, but it works for now. We can revisit this later if needed.
+# Hard code only open registration terms for now since those are the only ones we care about for the course export. We can expand this later if needed.
 startOn = get_start_date()
 endOn = get_end_date()
-params["criteria"] = '{"category":{"type":"term"}}'
+params["criteria"] = '{"category":{"type":"term"},"registration":"open"}'
 # params["limit"] = 3
 # params["offset"] = 0
 academicPeriodIterator = ethosClient.getResourceIterator(
@@ -348,20 +350,21 @@ academicPeriodIterator = ethosClient.getResourceIterator(
 
 #Get Terms
 cur = 0
-# Find terms within a 9 month window in the past and 9 month window in the future. This is to limit the number of terms we have to deal with for now. We can expand this later if needed.
+# Find terms that are open for registration
 terms = dict()
 for period in academicPeriodIterator:
   cur += 1
-  pprint(period.dict)
-  
   period_dict = period.dict
-  if period_dict is None:
-    continue
-  if check_date_range(period_dict['startOn'], period_dict['endOn']):
-    # print("Term is within 9 months in the past and 9 months in the future")
-    print(cur, "period", period.dict)
-    print(f"{cur} period, Term: {period_dict['code']}, Startdate {period_dict['startOn']}, Enddate {period_dict['endOn']}, Registration {period_dict['registration']}")
-    terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id'], "title": period_dict['title']}
+  terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id'], "title": period_dict['title']}
+
+# comment out the date range check for now since we are filtering by open registration terms and those are the only ones we care about for the course export. We can revisit this later if needed.
+#   if period_dict is None:
+#     continue
+#   if check_date_range(period_dict['startOn'], period_dict['endOn']):
+#     # print("Term is within 9 months in the past and 9 months in the future")
+#     print(cur, "period", period.dict)
+#     print(f"{cur} period, Term: {period_dict['code']}, Startdate {period_dict['startOn']}, Enddate {period_dict['endOn']}, Registration {period_dict['registration']}")
+#     terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id'], "title": period_dict['title']}
 
 
 # prep terms for csv export
@@ -413,7 +416,9 @@ for code, details in terms.items():
         # pprint(subject_dict)
         # pprint(course_dict)
         # pprint(course_dict['credits'])
+
         course_credit = find_greater(course_dict['credits'][0]['minimum'], course_dict['credits'][0]['maximum'])
+        
         sections_list.append({
             "course_number": course_dict['number'].strip()[:100],
             "course_title": course_dict['title'].strip()[:100],
