@@ -559,7 +559,7 @@ for sections in sections_raw_list:
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Professor ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
     # Get section enrollments
     params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
     enrollmentIterator = ethosClient.getResourceIterator(
