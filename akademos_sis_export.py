@@ -1,15 +1,16 @@
-import sys
-import os
-import time
-from pprint import pprint
-from dotenv import load_dotenv
-from pathlib import Path
 import csv
 import datetime
-from typing import List, Dict, Any,Union,Optional
+import os
+import sys
+import time
+from pathlib import Path
+from pprint import pprint
+from typing import Any, Dict, List, Optional, Union
+
+import paramiko
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
-
+from dotenv import load_dotenv
 
 # TODO: 
 # - Add error handling and logging
@@ -26,6 +27,7 @@ start_time = time.time()
 # This sample uses a resource iterator to list all the academic periods
 
 import EllucianEthosPythonClient
+
 load_dotenv()
 
 # Global variables
@@ -40,11 +42,51 @@ personCache: Dict[str, dict] = {}
 # Global variables for Ethos API access
 ethosBaseURL = os.environ["ETHOSBASEURL"]
 ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
+SFTP_SERVER = os.getenv("SFTPSERVER")
+SFTP_USERNAME = os.getenv("SFTPUSERNAME")
+SFTP_PASSWORD = os.getenv("SFTPPASSWORD")
+SFTP_PORT = int(os.getenv("SFTPPORT"))
 
 # Initialize the Ethos API client and obtain a login session using the API key
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
 loginSession = ethosClient.getLoginSessionFromAPIKey(apiKey=ethosAppAPIKey)
 
+def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
+    """
+    Uploads a local file to a remote SFTP server.
+
+    Args:
+        local_file_path: The Path object pointing to the local file to be uploaded.
+        remote_file_path: The destination path on the SFTP server where the file should be uploaded.
+
+    Raises:
+        Exception: If there is an error during the SFTP connection or file upload process.
+    """
+    try:
+        # Establish an SFTP connection using Paramiko
+        transport = paramiko.Transport((SFTP_SERVER, SFTP_PORT))
+        transport.connect(username=SFTP_USERNAME, password=SFTP_PASSWORD)
+        
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        
+        # Upload the file
+        sftp.put(str(local_file_path), remote_file_path)
+        
+        print(f"Successfully uploaded {local_file_path} to {remote_file_path} on SFTP server.")
+        
+    except Exception as e:
+        print(f"Error uploading file via SFTP: {e}")
+        raise
+        
+    finally:
+        # Ensure that the SFTP connection is closed properly
+        try:
+            if sftp:
+                sftp.close()
+            if transport:
+                transport.close()
+        except Exception as close_exception:
+            print(f"Error closing SFTP connection: {close_exception}")
 
 def format_runtime(seconds: float) -> str:
     """
@@ -355,7 +397,7 @@ terms = dict()
 for period in academicPeriodIterator:
   cur += 1
   period_dict = period.dict
-  terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id'], "title": period_dict['title']}
+  terms[period_dict['code']] = {"startOn": period_dict['startOn'], "endOn": period_dict['endOn'], "registration": period_dict['registration'], "id": period_dict['id'], "title": period_dict['title']} # type: ignore
 
 # comment out the date range check for now since we are filtering by open registration terms and those are the only ones we care about for the course export. We can revisit this later if needed.
 #   if period_dict is None:
@@ -379,6 +421,7 @@ for code, details in terms.items():
 term_list.sort(key=lambda x: x["start_date"]) 
 try:
     final_path = create_csv_from_dict_list(term_list, "terms")
+    terms_file_path = final_path
     print(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
     print(f"Error: {e}")  
@@ -444,6 +487,7 @@ for code, details in terms.items():
         #     break
 try:
     final_path = create_csv_from_dict_list(sections_list, "course")
+    course_file_path = final_path
     print(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
     print(f"Error: {e}")  
@@ -475,13 +519,14 @@ for sections in sections_raw_list:
         if personResourceID:
             person = get_person(personResourceID)
             if person:
-                pprint(person)
+                # pprint(person)
+                print(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "professor",
                     "first_name": person['names'][0]['firstName'].strip()[:150],
                     "last_name": person['names'][0]['lastName'].strip()[:150],
-                    "email": person['emails'][0]['address'].strip()[:150] if person['emails'] else None,
+                    "email": get_banner_username(person) + "@pipeline.sbcc.edu",
                     "phone_number": None,
                     "address_line1": None,
                     "address_line_2": None,
@@ -505,6 +550,7 @@ for sections in sections_raw_list:
         version="16",
         params=params
     )
+    # ISSUSE: user_list is not being populated with students. Need to figure out why. The enrollmentIterator is returning results, but the personResourceID is not being extracted correctly. Need to debug this.
     for enrollment in enrollmentIterator:
         enrollment_dict = enrollment.dict
         if enrollment_dict is None:
@@ -513,13 +559,14 @@ for sections in sections_raw_list:
         if personResourceID:
             person = get_person(personResourceID)
             if person:
-                pprint(person)
+                # pprint(person)
+                print(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "student",
                     "first_name": person['names'][0]['firstName'].strip()[:150],
                     "last_name": person['names'][0]['lastName'].strip()[:150],
-                    "email": person['emails'][0]['address'].strip()[:150] if person['emails'] else None,
+                    "email": get_banner_username(person) + "@pipeline.sbcc.edu",
                     "phone_number": None,
                     "address_line1": "Santa Barbara City College", #to be coded later for actual address if needed
                     "address_line_2": "721 Cliff Drive", #to be coded later for actual address if needed
@@ -536,27 +583,25 @@ for sections in sections_raw_list:
                 personCounter += 1
                 print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
     
-
-
-
-
-
-
-
-
-
-
-
-     
+   
 
 try:
     final_path = create_csv_from_dict_list(user_list, "user")
+    user_file_path = final_path
     print(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
     print(f"Error: {e}")
 
-for  user in user_list:
-    print(user)
+# for  user in user_list:
+#     print(user)
+
+# Send the generated CSV files via SFTP to akademos
+try:    
+    send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
+    send_file_via_sftp(course_file_path, f"TEST/course/{course_file_path.name}")
+    send_file_via_sftp(final_path, f"/{final_path.name}")
+except Exception as e:
+    print(f"Error during SFTP file upload: {e}")    
 
 # End timer
 end_time = time.time()
