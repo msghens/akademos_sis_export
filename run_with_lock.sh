@@ -3,7 +3,7 @@ set -euo pipefail
 
 LOCKFILE="/run/lock/akademos.lock"
 LOGFILE="/home/mghens/akademos_sis_export/logs/lock.log"
-MAX_LOG_SIZE=500000   # 500 KB
+MAX_LOG_SIZE=500000 # 500 KB
 
 timestamp() {
     date +"%Y-%m-%d %H:%M:%S"
@@ -20,16 +20,16 @@ cleanup() {
     echo "$(timestamp) [INFO] Cleaning up lockfile" >> "$LOGFILE"
     rm -f "$LOCKFILE"
 }
+
 trap cleanup EXIT INT TERM
 
 rotate_logs
 
 echo "$(timestamp) [INFO] Checking for stale lockfile" >> "$LOGFILE"
 
-# --- PID‑based stale lock detection ---
+# --- PID-based stale lock detection ---
 if [ -f "$LOCKFILE" ]; then
     LOCKPID=$(cat "$LOCKFILE" 2>/dev/null || true)
-
     if [[ "$LOCKPID" =~ ^[0-9]+$ ]]; then
         if kill -0 "$LOCKPID" 2>/dev/null; then
             echo "$(timestamp) [WARN] Lockfile exists and PID $LOCKPID is alive — exiting" >> "$LOGFILE"
@@ -44,18 +44,16 @@ if [ -f "$LOCKFILE" ]; then
     fi
 fi
 
-echo $$ > "$LOCKFILE"
-
-echo "$(timestamp) [INFO] Attempting to acquire lock: $LOCKFILE" >> "$LOGFILE"
-
-# Acquire lock using FD 200
+# Acquire lock using flock
 exec 200>"$LOCKFILE"
-if flock -n 200; then
-    echo "$(timestamp) [INFO] Lock acquired successfully by PID $$" >> "$LOGFILE"
-else
+if ! flock -n 200; then
     echo "$(timestamp) [WARN] Lock already held — exiting" >> "$LOGFILE"
     exit 0
 fi
+
+# Lock acquired — now write our PID
+echo $$ > "$LOCKFILE"
+echo "$(timestamp) [INFO] Lock acquired successfully by PID $$" >> "$LOGFILE"
 
 # --- Your original job ---
 cd /home/mghens/akademos_sis_export

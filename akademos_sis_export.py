@@ -45,7 +45,7 @@ ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
 SFTP_SERVER = os.getenv("SFTPSERVER")
 SFTP_USERNAME = os.getenv("SFTPUSERNAME")
 SFTP_PASSWORD = os.getenv("SFTPPASSWORD")
-SFTP_PORT = int(os.getenv("SFTPPORT"))
+SFTP_PORT = int(os.getenv("SFTPPORT", "22"))
 
 # Initialize the Ethos API client and obtain a login session using the API key
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
@@ -64,13 +64,23 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     """
     try:
         # Establish an SFTP connection using Paramiko
-        transport = paramiko.Transport((SFTP_SERVER, SFTP_PORT))
-        transport.connect(username=SFTP_USERNAME, password=SFTP_PASSWORD)
-        
-        sftp = paramiko.SFTPClient.from_transport(transport)
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if not all([SFTP_SERVER, SFTP_USERNAME, SFTP_PASSWORD]):
+            raise ValueError("Missing required environment variables for SFTP connection (SFTPSERVER, SFTPUSERNAME, SFTPPASSWORD).")
+        ssh_client.connect(str(SFTP_SERVER), port=SFTP_PORT, username=SFTP_USERNAME, password=SFTP_PASSWORD)
+        transport = ssh_client.get_transport()
+
+        if transport:
+            sftp = paramiko.SFTPClient.from_transport(transport)
+        else:
+            raise ConnectionError("Could not establish SFTP transport.")
         
         # Upload the file
-        sftp.put(str(local_file_path), remote_file_path)
+        if sftp:
+            sftp.put(str(local_file_path), remote_file_path)
+        else:
+            raise ConnectionError("SFTP client could not be initialized for upload.")
         
         print(f"Successfully uploaded {local_file_path} to {remote_file_path} on SFTP server.")
         
