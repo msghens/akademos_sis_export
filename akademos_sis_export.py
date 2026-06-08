@@ -445,6 +445,14 @@ for code, details in terms.items():
     pageSize=500
     )
     for sections in sectionsIterator:
+        if sections.dict is None:
+            continue
+        course_dict = get_course(sections.dict['course']['id'])
+        if course_dict is None:
+            continue
+        # Filter out non-credit courses for now since credit courses are the only ones we care about for the course export. We can expand this later if needed.
+        if "NC" in course_dict['number']:
+            continue
         sections_raw = sections
         sections_raw.dict['code'] = code # type: ignore
         sections_raw_list.append(sections_raw)
@@ -454,7 +462,7 @@ for code, details in terms.items():
         number_of_sections += 1
         # print(sections_dict['course']['id'])
         # pprint(sections_dict)
-        course_dict = get_course(sections_dict['course']['id'])
+    
         subject_dict = get_subject(course_dict['subject']['id'])
         # pprint(subject_dict)
         # pprint(course_dict)
