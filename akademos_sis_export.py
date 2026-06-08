@@ -568,12 +568,17 @@ for sections in sections_raw_list:
         version="16",
         params=params
     )
-    # ISSUSE: user_list is not being populated with students. Need to figure out why. The enrollmentIterator is returning results, but the personResourceID is not being extracted correctly. Need to debug this.
+    
     for enrollment in enrollmentIterator:
         enrollment_dict = enrollment.dict
+        # print(f"Enrollment dict: {enrollment_dict}")
         if enrollment_dict is None:
             continue
-        personResourceID = enrollment_dict.get('student', {}).get('id')
+        print(f"Processing enrollment: {enrollment_dict['id']} for section {sections_dict['code']} term {terms[sections_dict['code']]['title']}")
+        if enrollment_dict.get('status').get('registrationStatus') != "registered":
+            print(f"Skipping enrollment {enrollment_dict['id']} for person {enrollment_dict.get('registrant', {}).get('id')} because registration status is {enrollment_dict.get('status').get('registrationStatus')}")
+            continue
+        personResourceID = enrollment_dict.get('registrant', {}).get('id')
         if personResourceID:
             person = get_person(personResourceID)
             if person:
