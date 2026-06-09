@@ -4,7 +4,7 @@
 ![Status](https://img.shields.io/badge/Status-Development-yellow)
 
 
-```
+
 
 Python script to extract Banner SIS data to export to Akademos/Vitalsource
 
