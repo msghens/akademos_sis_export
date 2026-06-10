@@ -5,6 +5,7 @@ __pycache__/
 /.vscode
 work.py
 akademos_sis_export_opt.py
+do_git.sh
 
 
 # Byte-compiled / optimized / DLL files
