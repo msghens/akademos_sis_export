@@ -479,8 +479,7 @@ try:
 except ValueError as e:
     print(f"Error: {e}")  
 
-send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
-exit(0) # Exit here for testing purposes to avoid running the rest of the code while we are testing the SFTP upload of the terms file. We can remove this later when we are ready to run the full code.
+
 
 #Pref for file writing
 # Prepare a list to store all sections
