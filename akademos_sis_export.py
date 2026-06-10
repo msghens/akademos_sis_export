@@ -1,6 +1,7 @@
 import csv
 import datetime
 import os
+import socket
 import sys
 import time
 from pathlib import Path
@@ -42,10 +43,10 @@ personCache: Dict[str, dict] = {}
 # Global variables for Ethos API access
 ethosBaseURL = os.environ["ETHOSBASEURL"]
 ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
-SFTP_SERVER = os.getenv("SFTPSERVER")
-SFTP_USERNAME = os.getenv("SFTPUSERNAME")
-SFTP_PASSWORD = os.getenv("SFTPPASSWORD")
-SFTP_PORT = int(os.getenv("SFTPPORT", "22"))
+# SFTP_SERVER = os.getenv("SFTPSERVER")
+# SFTP_USERNAME = os.getenv("SFTPUSERNAME")
+# SFTP_PASSWORD = os.getenv("SFTPPASSWORD")
+# SFTP_PORT = int(os.getenv("SFTPPORT", "22"))
 
 # Initialize the Ethos API client and obtain a login session using the API key
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
@@ -53,50 +54,92 @@ loginSession = ethosClient.getLoginSessionFromAPIKey(apiKey=ethosAppAPIKey)
 
 def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     """
-    Uploads a local file to a remote SFTP server.
-
-    Args:
-        local_file_path: The Path object pointing to the local file to be uploaded.
-        remote_file_path: The destination path on the SFTP server where the file should be uploaded.
-
-    Raises:
-        Exception: If there is an error during the SFTP connection or file upload process.
+    Uploads a local file to a remote SFTP server with detailed debugging.
     """
+    if not local_file_path.exists():
+        raise FileNotFoundError(f"Local file not found: {local_file_path}")
+
+    # === Load Environment Variables ===
+    sftp_server = os.getenv("SFTPSERVER")
+    sftp_port = int(os.getenv("SFTPPORT", 22))
+    sftp_username = os.getenv("SFTPUSERNAME")
+    sftp_password = os.getenv("SFTPPASSWORD")
+
+    print(f"🔍 SFTP Config - Server: {sftp_server}, Port: {sftp_port}, User: {sftp_username}")
+
+    if not all([sftp_server, sftp_username, sftp_password]):
+        raise ValueError("Missing SFTP environment variables (SFTP_SERVER, SFTP_USERNAME, SFTP_PASSWORD)")
+
+    ssh_client: Optional[paramiko.SSHClient] = None
+    sftp: Optional[paramiko.SFTPClient] = None
+
     try:
-        # Establish an SFTP connection using Paramiko
+        print(f"🔄 Connecting to {sftp_server}:{sftp_port} ...")
+
+        # Test basic network connectivity first
+        try:
+            sock = socket.create_connection((sftp_server, sftp_port), timeout=10)
+            sock.close()
+            print("✅ Network connectivity OK")
+        except Exception as sock_err:
+            print(f"❌ Cannot reach server on port {sftp_port}: {sock_err}")
+            print("   Check hostname, port, firewall, and VPN.")
+            raise
+
+        # SSH Connection
         ssh_client = paramiko.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        if not all([SFTP_SERVER, SFTP_USERNAME, SFTP_PASSWORD]):
-            raise ValueError("Missing required environment variables for SFTP connection (SFTPSERVER, SFTPUSERNAME, SFTPPASSWORD).")
-        ssh_client.connect(str(SFTP_SERVER), port=SFTP_PORT, username=SFTP_USERNAME, password=SFTP_PASSWORD)
-        transport = ssh_client.get_transport()
 
-        if transport:
-            sftp = paramiko.SFTPClient.from_transport(transport)
-        else:
-            raise ConnectionError("Could not establish SFTP transport.")
-        
-        # Upload the file
-        if sftp:
-            sftp.put(str(local_file_path), remote_file_path)
-        else:
-            raise ConnectionError("SFTP client could not be initialized for upload.")
-        
-        print(f"Successfully uploaded {local_file_path} to {remote_file_path} on SFTP server.")
-        
-    except Exception as e:
-        print(f"Error uploading file via SFTP: {e}")
+        ssh_client.connect(
+            hostname=sftp_server,
+            port=sftp_port,
+            username=sftp_username,
+            password=sftp_password,
+            timeout=15,
+            banner_timeout=15,
+            auth_timeout=15,
+            allow_agent=False,
+            look_for_keys=False
+        )
+
+        print("✅ SSH connection established")
+
+        transport = ssh_client.get_transport()
+        if not transport:
+            raise ConnectionError("Failed to get transport")
+
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        if not sftp:
+            raise ConnectionError("Failed to create SFTP client")
+
+        print(f"📤 Uploading {local_file_path.name} to {remote_file_path}...")
+        sftp.put(str(local_file_path), remote_file_path)
+
+        print(f"✅ Successfully uploaded {local_file_path.name}")
+
+    except paramiko.AuthenticationException:
+        print("❌ Authentication failed - Check username/password")
         raise
-        
+    except paramiko.SSHException as e:
+        print(f"❌ SSH Error: {e}")
+        raise
+    except socket.timeout:
+        print("❌ Connection timeout - Server unreachable or too slow")
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise
     finally:
-        # Ensure that the SFTP connection is closed properly
-        try:
-            if sftp:
+        if sftp:
+            try:
                 sftp.close()
-            if transport:
-                transport.close()
-        except Exception as close_exception:
-            print(f"Error closing SFTP connection: {close_exception}")
+            except:
+                pass
+        if ssh_client:
+            try:
+                ssh_client.close()
+            except:
+                pass
 
 def format_runtime(seconds: float) -> str:
     """
@@ -436,6 +479,8 @@ try:
 except ValueError as e:
     print(f"Error: {e}")  
 
+send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
+exit(0) # Exit here for testing purposes to avoid running the rest of the code while we are testing the SFTP upload of the terms file. We can remove this later when we are ready to run the full code.
 
 #Pref for file writing
 # Prepare a list to store all sections
@@ -622,7 +667,7 @@ except ValueError as e:
 try:    
     send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
     send_file_via_sftp(course_file_path, f"TEST/course/{course_file_path.name}")
-    send_file_via_sftp(final_path, f"/{final_path.name}")
+    send_file_via_sftp(user_file_path, f"TEST/user/{user_file_path.name}")
 except Exception as e:
     print(f"Error during SFTP file upload: {e}")    
 
