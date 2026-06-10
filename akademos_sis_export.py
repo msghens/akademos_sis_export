@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 # Start timer
 start_time = time.time()
+print("Starting Akademos SIS Export...")
 
 ### Akademos SIS Export
 
