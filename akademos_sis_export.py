@@ -490,6 +490,7 @@ sections_raw_list = []
 number_of_sections = 0
 for code, details in terms.items():
     
+    term_code = code
     params["criteria"] = "{\"academicPeriod\":{\"id\":\"" + details["id"] + "\"},\"status\":\"open\"}"
     sectionsIterator = ethosClient.getResourceIterator(
 
@@ -509,11 +510,12 @@ for code, details in terms.items():
         if "NC" in course_dict['number']:
             continue
         sections_raw = sections
-        sections_raw.dict['code'] = code # type: ignore
-        sections_raw_list.append(sections_raw)
         sections_dict = sections.dict
         if sections_dict is None:
             continue
+        sections_raw.dict['term_code'] = term_code # type: ignore
+        sections_raw_list.append(sections_raw)
+
         number_of_sections += 1
         # print(sections_dict['course']['id'])
         # pprint(sections_dict)
@@ -526,20 +528,20 @@ for code, details in terms.items():
         course_credit = find_greater(course_dict['credits'][0]['minimum'], course_dict['credits'][0]['maximum'])
         
         sections_list.append({
-            "course_number": course_dict['number'].strip()[:100],
-            "course_title": course_dict['title'].strip()[:100],
+            "course_number": sections_dict['code'].strip()[:100],
+            "course_title": sections_dict['title'].strip()[:100],
             "course_name": subject_dict['abbreviation'].strip()[:60],
-            "course_code": sections_dict['code'].strip()[:60],
-            "course_section": None,
+            "course_code": course_dict['number'].strip()[:60],
+            "course_section": subject_dict['number'],
             "course_credit": str(course_credit)[:3] if course_credit else "0",
             "course_model": None, #to be coded later if needed Designate courses in a particular program (e.g. EA). Required for Equitable Access clients
             "department_code":  subject_dict['abbreviation'].strip()[:20],
             "department_desc": subject_dict['title'].strip()[:150],
-            "campus_code": "TBD", #to be coded later for man, online,etc
-            "campus_desc": "TBD", #to be coded later
+            "campus_code": None, #to be coded later for man, online,etc
+            "campus_desc": None, #to be coded later
             "term_code": code.strip()[:20],
             "term_desc": terms[code]["title"].strip()[:150],
-            "session_code": None, #to be coded later if needed,
+            "session_code": sections_dict['number'].strip()[:64], 
             "start_date": sections_dict["startOn"].split('T')[0],
             "end_date": sections_dict["endOn"].split('T')[0],
             "enrollment_cap": int(str(sections_dict['maxEnrollment'])[:4] if str(sections_dict['maxEnrollment']) else 0)
@@ -636,7 +638,7 @@ for sections in sections_raw_list:
                     "last_name": person['names'][0]['lastName'].strip()[:150],
                     "email": get_banner_username(person) + "@pipeline.sbcc.edu",
                     "phone_number": None,
-                    "address_line1": "Santa Barbara City College", #to be coded later for actual address if needed
+                    "address_line1": "Santa Barbara City College, Bookstore", #to be coded later for actual address if needed
                     "address_line_2": "721 Cliff Drive", #to be coded later for actual address if needed
                     "city": "Santa Barbara",
                     "state": "CA",
@@ -644,7 +646,7 @@ for sections in sections_raw_list:
                     "student_major": None, #to be coded later if needed
                     "student_grade_level": "unclassified", #to be coded later if needed
                     "course_number": course_dict['number'].strip()[:100],
-                    "term_code": sections_dict['code'].strip()[:20],
+                    "term_code": sections_dict['term_code'].strip()[:20],
                     "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
