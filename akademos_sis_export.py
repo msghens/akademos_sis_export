@@ -602,11 +602,11 @@ for sections in sections_raw_list:
                     "student_grade_level": None,
                     "course_number": course_dict['number'].strip()[:100],
                     "term_code": sections_dict['term_code'].strip()[:20],
-                    "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
+                    "term_desc": terms[sections_dict['term_code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Professor ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Professor ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
     # Get section enrollments
     params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
     enrollmentIterator = ethosClient.getResourceIterator(
@@ -621,7 +621,7 @@ for sections in sections_raw_list:
         # print(f"Enrollment dict: {enrollment_dict}")
         if enrollment_dict is None:
             continue
-        print(f"Processing enrollment: {enrollment_dict['id']} for section {sections_dict['code']} term {terms[sections_dict['code']]['title']}")
+        print(f"Processing enrollment: {enrollment_dict['id']} for section {sections_dict['code']} term {terms[sections_dict['term_code']]['title']}")
         if enrollment_dict.get('status').get('registrationStatus') != "registered":
             print(f"Skipping enrollment {enrollment_dict['id']} for person {enrollment_dict.get('registrant', {}).get('id')} because registration status is {enrollment_dict.get('status').get('registrationStatus')}")
             continue
@@ -651,7 +651,7 @@ for sections in sections_raw_list:
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['code']} {terms[sections_dict['code']]["title"]} - Username: {get_banner_username(person)}")
+                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
     
    
 
