@@ -601,7 +601,7 @@ for sections in sections_raw_list:
                     "student_major": None,
                     "student_grade_level": None,
                     "course_number": course_dict['number'].strip()[:100],
-                    "term_code": sections_dict['code'].strip()[:20],
+                    "term_code": sections_dict['term_code'].strip()[:20],
                     "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
@@ -647,7 +647,7 @@ for sections in sections_raw_list:
                     "student_grade_level": "unclassified", #to be coded later if needed
                     "course_number": course_dict['number'].strip()[:100],
                     "term_code": sections_dict['term_code'].strip()[:20],
-                    "term_desc": terms[sections_dict['code']]["title"].strip()[:150],
+                    "term_desc": terms[sections_dict['term_code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
