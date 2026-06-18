@@ -638,11 +638,11 @@ for sections in sections_raw_list:
                     "last_name": person['names'][0]['lastName'].strip()[:150],
                     "email": get_banner_username(person) + "@pipeline.sbcc.edu",
                     "phone_number": None,
-                    "address_line1": "Santa Barbara City College, Bookstore", #to be coded later for actual address if needed
-                    "address_line_2": "721 Cliff Drive", #to be coded later for actual address if needed
-                    "city": "Santa Barbara",
-                    "state": "CA",
-                    "postal_code": "93109",
+                    "address_line1": None, #to be coded later for actual address if needed
+                    "address_line_2": None, #to be coded later for actual address if needed
+                    "city": None, #to be coded later for actual address if needed
+                    "state": None, #to be coded later for actual address if needed
+                    "postal_code": None, #to be coded later for actual address if needed
                     "student_major": None, #to be coded later if needed
                     "student_grade_level": "unclassified", #to be coded later if needed
                     "course_number": course_dict['number'].strip()[:100],
