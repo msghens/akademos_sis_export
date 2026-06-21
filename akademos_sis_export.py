@@ -579,9 +579,12 @@ for sections in sections_raw_list:
         params=params
     )
     
+    # Process each instructor and add them to the user list
+    duplicate_instructor_ids = set()  # To track already processed instructors for this section
     for instructor in instructorIterator:
         personResourceID = instructor.dict.get('instructor', {}).get('id') # type: ignore
-        if personResourceID:
+        if personResourceID and personResourceID not in duplicate_instructor_ids:
+            duplicate_instructor_ids.add(personResourceID)  # Mark this instructor as processed
             person = get_person(personResourceID)
             if person:
                 # pprint(person)
@@ -616,6 +619,8 @@ for sections in sections_raw_list:
         params=params
     )
     
+    # Process each enrollment and add them to the user list
+    duplicate_enrollment_ids = set()  # To track already processed enrollments for this section
     for enrollment in enrollmentIterator:
         enrollment_dict = enrollment.dict
         # print(f"Enrollment dict: {enrollment_dict}")
@@ -626,7 +631,8 @@ for sections in sections_raw_list:
             print(f"Skipping enrollment {enrollment_dict['id']} for person {enrollment_dict.get('registrant', {}).get('id')} because registration status is {enrollment_dict.get('status').get('registrationStatus')}")
             continue
         personResourceID = enrollment_dict.get('registrant', {}).get('id')
-        if personResourceID:
+        if personResourceID and personResourceID not in duplicate_enrollment_ids:
+            duplicate_enrollment_ids.add(personResourceID)  # Mark this enrollment as processed
             person = get_person(personResourceID)
             if person:
                 # pprint(person)
