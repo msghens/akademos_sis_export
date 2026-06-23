@@ -2,6 +2,7 @@ import csv
 import datetime
 import os
 import socket
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -92,7 +93,7 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         ssh_client.connect(
-            hostname=sftp_server,
+            hostname=sftp_server,  # type: ignore
             port=sftp_port,
             username=sftp_username,
             password=sftp_password,
@@ -563,6 +564,8 @@ print(f"Number of sections: {number_of_sections}")
 #start with instuctor first.
 # create a list of instructors to be exported to a users CSV
 user_list = []
+# list of time.perf_counter() to measure the time taken for each person api call
+person_times = []
 personCounter = 0;
 for sections in sections_raw_list:
     sections_dict = sections.dict
@@ -585,7 +588,10 @@ for sections in sections_raw_list:
         personResourceID = instructor.dict.get('instructor', {}).get('id') # type: ignore
         if personResourceID and personResourceID not in duplicate_instructor_ids:
             duplicate_instructor_ids.add(personResourceID)  # Mark this instructor as processed
+
+            perf_counter_start = time.perf_counter()
             person = get_person(personResourceID)
+            person_times.append(time.perf_counter() - perf_counter_start)
             if person:
                 # pprint(person)
                 print(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
@@ -633,7 +639,9 @@ for sections in sections_raw_list:
         personResourceID = enrollment_dict.get('registrant', {}).get('id')
         if personResourceID and personResourceID not in duplicate_enrollment_ids:
             duplicate_enrollment_ids.add(personResourceID)  # Mark this enrollment as processed
+            perf_counter_start = time.perf_counter()
             person = get_person(personResourceID)
+            person_times.append(time.perf_counter() - perf_counter_start)
             if person:
                 # pprint(person)
                 print(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
@@ -658,8 +666,26 @@ for sections in sections_raw_list:
                 })
                 personCounter += 1
                 print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
-    
-   
+# Person processing time statistics
+if person_times:
+    total_time = sum(person_times)
+    average_time = statistics.mean(person_times)
+    max_time = max(person_times)
+    min_time = min(person_times)
+    med = statistics.median(person_times)
+    mdev = statistics.median([abs(x - med) for x in person_times])
+
+    print(f"\nPerson API Call Statistics:")
+    print(f"Total persons processed: {len(person_times)}")
+    print(f"Total time taken: {total_time:.4f} seconds")
+    print(f"Average time per person: {average_time:.4f} seconds")
+    print(f"Stdev: {statistics.stdev(person_times):.4f}s")
+    print(f"Max time for a single person: {max_time:.4f} seconds")
+    print(f"Min time for a single person: {min_time:.4f} seconds")
+    print(f"Median time for a single person: {med:.4f} seconds")
+    print(f"Median absolute deviation: {mdev:.4f} seconds")
+
+print(f"Total number of persons processed: {personCounter}")   
 
 try:
     final_path = create_csv_from_dict_list(user_list, "user")
