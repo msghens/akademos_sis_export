@@ -11,10 +11,17 @@ from pathlib import Path
 from pprint import pprint
 from typing import Any, Dict, List, Optional, Union
 
+import EllucianEthosPythonClient
 import paramiko
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
+
+### Akademos SIS Export
+
+
+# Load environment variables from a .env file if it exists
+load_dotenv()
 
 # TODO: 
 # - Add error handling and logging
@@ -82,14 +89,6 @@ logger = setup_logging()
 start_time = time.monotonic()
 logger.info("Starting Akademos SIS Export...")
 
-### Akademos SIS Export
-
-# This sample uses a resource iterator to list all the academic periods
-
-import EllucianEthosPythonClient
-
-load_dotenv()
-
 # Global variables
 
 # Cache for storing frequently accessed resources to avoid repeated API calls
@@ -102,10 +101,6 @@ personCache: Dict[str, dict] = {}
 # Global variables for Ethos API access
 ethosBaseURL = os.environ["ETHOSBASEURL"]
 ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
-# SFTP_SERVER = os.getenv("SFTPSERVER")
-# SFTP_USERNAME = os.getenv("SFTPUSERNAME")
-# SFTP_PASSWORD = os.getenv("SFTPPASSWORD")
-# SFTP_PORT = int(os.getenv("SFTPPORT", "22"))
 
 # Initialize the Ethos API client and obtain a login session using the API key
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
@@ -508,6 +503,7 @@ academicPeriodIterator = ethosClient.getResourceIterator(
 #Get Terms
 cur = 0
 # Find terms that are open for registration
+logger.info(f"Fetching academic periods")
 terms = dict()
 for period in academicPeriodIterator:
   cur += 1
@@ -527,6 +523,7 @@ for period in academicPeriodIterator:
 # prep terms for csv export
 term_list = []  
 for code, details in terms.items():
+    logger.debug
     term_list.append({
         "term_code": code.strip()[:20],
         "start_date": details["startOn"].split('T')[0],
@@ -537,7 +534,7 @@ term_list.sort(key=lambda x: x["start_date"])
 try:
     final_path = create_csv_from_dict_list(term_list, "terms")
     terms_file_path = final_path
-    logger.info(f"Successfully created CSV at: {final_path}")
+    logger.info(f"Successfully created CSV at: {terms_file_path}")
 except ValueError as e:
     logger.error(f"Error: {e}",exc_info=True)  
 
@@ -549,6 +546,7 @@ sections_list = []
 sections_raw_list = []
 # Initialize a counter for the number of sections
 number_of_sections = 0
+logger.info(f"Fetching sections for each term")
 for code, details in terms.items():
     
     term_code = code
@@ -578,14 +576,8 @@ for code, details in terms.items():
         sections_raw_list.append(sections_raw)
 
         number_of_sections += 1
-        # print(sections_dict['course']['id'])
-        # pprint(sections_dict)
     
         subject_dict = get_subject(course_dict['subject']['id'])
-        # pprint(subject_dict)
-        # pprint(course_dict)
-        # pprint(course_dict['credits'])
-
         course_credit = find_greater(course_dict['credits'][0]['minimum'], course_dict['credits'][0]['maximum'])
         
         sections_list.append({
@@ -627,6 +619,7 @@ user_list = []
 # list of time.perf_counter() to measure the time taken for each person api call
 person_times = []
 personCounter = 0;
+logger.info(f"Fetching instructors and students for each section")
 for sections in sections_raw_list:
     sections_dict = sections.dict
     if sections_dict is None:
