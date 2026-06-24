@@ -32,7 +32,7 @@ def setup_logging():
 
     # Create logger
     logger = logging.getLogger("akademos_sis")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logging
 
     # Remove existing handlers to avoid duplicates
     if logger.hasHandlers():
@@ -639,7 +639,7 @@ for sections in sections_raw_list:
             person = get_person(personResourceID)
             person_times.append(time.perf_counter() - perf_counter_start)
             if person:
-                logger.info(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
+                logger.debug(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
                 #Fix first name to have None instead of a '.'
                 if person['names'][0]['firstName'].strip() == ".":
                     person['names'][0]['firstName'] = None
