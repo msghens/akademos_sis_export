@@ -1,5 +1,7 @@
 import csv
 import datetime
+import logging
+import logging.handlers
 import os
 import socket
 import statistics
@@ -20,10 +22,51 @@ from dotenv import load_dotenv
 # NOTES:
 # - Email use username maildomain or fine sbcc -Akademos Wants college emails
 
+# ====================== LOGGING SETUP ======================
+def setup_logging():
+    """Configure logging to both console and rotating file."""
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_file = log_dir / "akademos_sis_export.log"
+
+    # Create logger
+    logger = logging.getLogger("akademos_sis")
+    logger.setLevel(logging.INFO)
+
+    # Remove existing handlers to avoid duplicates
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    # Formatter
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Console Handler (stdout)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # Rotating File Handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,   # 5 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    return logger
+
+# Initialize logger
+logger = setup_logging()
 
 # Start timer
 start_time = time.time()
-print("Starting Akademos SIS Export...")
+logger.info("Starting Akademos SIS Export...")
 
 ### Akademos SIS Export
 
@@ -59,6 +102,7 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     Uploads a local file to a remote SFTP server with detailed debugging.
     """
     if not local_file_path.exists():
+        logger.error(f"Local file not found: {local_file_path}")
         raise FileNotFoundError(f"Local file not found: {local_file_path}")
 
     # === Load Environment Variables ===
@@ -67,25 +111,26 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     sftp_username = os.getenv("SFTPUSERNAME")
     sftp_password = os.getenv("SFTPPASSWORD")
 
-    print(f"🔍 SFTP Config - Server: {sftp_server}, Port: {sftp_port}, User: {sftp_username}")
+    logger.info(f"SFTP Config - Server: {sftp_server}, Port: {sftp_port}, User: {sftp_username}")
 
     if not all([sftp_server, sftp_username, sftp_password]):
+        logger.error("Missing SFTP environment variables (SFTPSERVER, SFTPUSERNAME, SFTPPASSWORD)")
         raise ValueError("Missing SFTP environment variables (SFTP_SERVER, SFTP_USERNAME, SFTP_PASSWORD)")
 
     ssh_client: Optional[paramiko.SSHClient] = None
     sftp: Optional[paramiko.SFTPClient] = None
 
     try:
-        print(f"🔄 Connecting to {sftp_server}:{sftp_port} ...")
+        logger.info(f"Connecting to {sftp_server}:{sftp_port} ...")
 
         # Test basic network connectivity first
         try:
             sock = socket.create_connection((sftp_server, sftp_port), timeout=10)
             sock.close()
-            print("✅ Network connectivity OK")
+            logger.info("Network connectivity OK")
         except Exception as sock_err:
-            print(f"❌ Cannot reach server on port {sftp_port}: {sock_err}")
-            print("   Check hostname, port, firewall, and VPN.")
+            logger.error(f"Cannot reach server on port {sftp_port}: {sock_err}",exc_info=True)
+            logger.error("   Check hostname, port, firewall, and VPN.",exc_info=True)
             raise
 
         # SSH Connection
@@ -104,7 +149,7 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
             look_for_keys=False
         )
 
-        print("✅ SSH connection established")
+        logger.info("SSH connection established")
 
         transport = ssh_client.get_transport()
         if not transport:
@@ -112,24 +157,25 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
 
         sftp = paramiko.SFTPClient.from_transport(transport)
         if not sftp:
+            logger.error("Failed to create SFTP client")
             raise ConnectionError("Failed to create SFTP client")
 
-        print(f"📤 Uploading {local_file_path.name} to {remote_file_path}...")
+        logger.info(f"Uploading {local_file_path.name} to {remote_file_path}...")
         sftp.put(str(local_file_path), remote_file_path)
 
-        print(f"✅ Successfully uploaded {local_file_path.name}")
+        logger.info(f"Successfully uploaded {local_file_path.name}")
 
     except paramiko.AuthenticationException:
-        print("❌ Authentication failed - Check username/password")
+        logger.error("Authentication failed - Check username/password",exc_info=True)
         raise
     except paramiko.SSHException as e:
-        print(f"❌ SSH Error: {e}")
+        logger.error(f"SSH Error: {e}",exc_info=True)
         raise
     except socket.timeout:
-        print("❌ Connection timeout - Server unreachable or too slow")
+        logger.error("Connection timeout - Server unreachable or too slow",exc_info=True)
         raise
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        logger.error(f"Unexpected error: {e}",exc_info=True)
         raise
     finally:
         if sftp:
@@ -248,7 +294,7 @@ def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str)
         # exist_ok=True prevents an error if the directory already exists
         output_dir.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        print(f"Error creating directory 'data': {e}")
+        logger.error(f"Error creating directory 'data': {e}",exc_info=True)
         raise
 
     # --- 3. Writing the CSV File ---
@@ -266,7 +312,7 @@ def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str)
         return output_file_path
         
     except Exception as e:
-        print(f"An error occurred while writing the CSV file: {e}")
+        logger.error(f"An error occurred while writing the CSV file: {e}",exc_info=True)
         raise
 
 
@@ -335,13 +381,13 @@ def check_date_range(begin_date_str: str, end_date_str: str) -> bool:
         begin_date = parser.parse(begin_date_str)
         end_date = parser.parse(end_date_str)
     except Exception as e:
-        print(f"Error parsing dates: {e}")
+        logger.error(f"Error parsing dates: {e}",exc_info=True)
         return False
 
     # Crucial Step: Ensure timezone awareness for accurate comparison.
     # If the parsed dates are naive, assume UTC as per best practice for backend data.
     if begin_date.tzinfo is None and end_date.tzinfo is None:
-        print("Warning: Input dates were naive. Assuming UTC timezone for comparison.")
+        logger.warn("Warning: Input dates were naive. Assuming UTC timezone for comparison.")
         begin_date = begin_date.replace(tzinfo=datetime.timezone.utc)
         end_date = end_date.replace(tzinfo=datetime.timezone.utc)
 
@@ -423,7 +469,7 @@ def get_banner_username(person: dict) -> str:
             return credential.get('value').strip()[:50]
     return None # type: ignore
 
-print("Start")
+logger.info("Start")
 
 
 
@@ -477,9 +523,9 @@ term_list.sort(key=lambda x: x["start_date"])
 try:
     final_path = create_csv_from_dict_list(term_list, "terms")
     terms_file_path = final_path
-    print(f"Successfully created CSV at: {final_path}")
+    logger.info(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
-    print(f"Error: {e}")  
+    logger.error(f"Error: {e}",exc_info=True)  
 
 
 
@@ -533,7 +579,7 @@ for code, details in terms.items():
             "course_title": sections_dict['title'].strip()[:100],
             "course_name": subject_dict['abbreviation'].strip()[:60],
             "course_code": course_dict['number'].strip()[:60],
-            "course_section": None, #to be coded later if needed
+            "course_section": sections_dict['number'].strip()[:60], #to be coded later if needed
             "course_credit": str(course_credit)[:3] if course_credit else "0",
             "course_model": None, #to be coded later if needed Designate courses in a particular program (e.g. EA). Required for Equitable Access clients
             "department_code":  subject_dict['abbreviation'].strip()[:20],
@@ -542,23 +588,23 @@ for code, details in terms.items():
             "campus_desc": None, #to be coded later
             "term_code": code.strip()[:20],
             "term_desc": terms[code]["title"].strip()[:150],
-            "session_code": sections_dict['number'].strip()[:64], 
+            "session_code": None, #to be coded later if needed
             "start_date": sections_dict["startOn"].split('T')[0],
             "end_date": sections_dict["endOn"].split('T')[0],
             "enrollment_cap": int(str(sections_dict['maxEnrollment'])[:4] if str(sections_dict['maxEnrollment']) else 0)
         })
-        print( sections_dict['guid'], "course_number:", course_dict['number'], "course_title:", course_dict['title'], "course_name:", subject_dict['abbreviation'], "course_code:", sections_dict['code'], "term_code:", code, "term_desc:", terms[code]["title"], "start_date:", sections_dict["startOn"].split('T')[0], "end_date:", sections_dict["endOn"].split('T')[0], "enrollment_cap:", sections_dict['maxEnrollment'])
+        logger.debug( sections_dict['guid'], "course_number:", course_dict['number'], "course_title:", course_dict['title'], "course_name:", subject_dict['abbreviation'], "course_code:", sections_dict['code'], "term_code:", code, "term_desc:", terms[code]["title"], "start_date:", sections_dict["startOn"].split('T')[0], "end_date:", sections_dict["endOn"].split('T')[0], "enrollment_cap:", sections_dict['maxEnrollment'])
         # Break if we've reached the limit. For testing purposes, we'll limit to 10 sections
         # if number_of_sections > 10:
         #     break
 try:
     final_path = create_csv_from_dict_list(sections_list, "course")
     course_file_path = final_path
-    print(f"Successfully created CSV at: {final_path}")
+    logger.info(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
-    print(f"Error: {e}")  
+    logger.error(f"Error: {e}",exc_info=True)  
 
-print(f"Number of sections: {number_of_sections}")
+logger.info(f"Number of sections: {number_of_sections}")
 
 # create user csv 
 #start with instuctor first.
@@ -593,8 +639,7 @@ for sections in sections_raw_list:
             person = get_person(personResourceID)
             person_times.append(time.perf_counter() - perf_counter_start)
             if person:
-                # pprint(person)
-                print(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
+                logger.info(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "professor",
@@ -609,13 +654,13 @@ for sections in sections_raw_list:
                     "postal_code": None,
                     "student_major": None,
                     "student_grade_level": None,
-                    "course_number": course_dict['number'].strip()[:100],
+                    "course_number": sections_dict['code'].strip()[:100],
                     "term_code": sections_dict['term_code'].strip()[:20],
                     "term_desc": terms[sections_dict['term_code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Professor ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
+                logger.debug(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Professor ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
     # Get section enrollments
     params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
     enrollmentIterator = ethosClient.getResourceIterator(
@@ -629,12 +674,11 @@ for sections in sections_raw_list:
     duplicate_enrollment_ids = set()  # To track already processed enrollments for this section
     for enrollment in enrollmentIterator:
         enrollment_dict = enrollment.dict
-        # print(f"Enrollment dict: {enrollment_dict}")
         if enrollment_dict is None:
             continue
-        print(f"Processing enrollment: {enrollment_dict['id']} for section {sections_dict['code']} term {terms[sections_dict['term_code']]['title']}")
+        logger.debug(f"Processing enrollment: {enrollment_dict['id']} for section {sections_dict['code']} term {terms[sections_dict['term_code']]['title']}")
         if enrollment_dict.get('status').get('registrationStatus') != "registered":
-            print(f"Skipping enrollment {enrollment_dict['id']} for person {enrollment_dict.get('registrant', {}).get('id')} because registration status is {enrollment_dict.get('status').get('registrationStatus')}")
+            logger.debug(f"Skipping enrollment {enrollment_dict['id']} for person {enrollment_dict.get('registrant', {}).get('id')} because registration status is {enrollment_dict.get('status').get('registrationStatus')}")
             continue
         personResourceID = enrollment_dict.get('registrant', {}).get('id')
         if personResourceID and personResourceID not in duplicate_enrollment_ids:
@@ -644,7 +688,7 @@ for sections in sections_raw_list:
             person_times.append(time.perf_counter() - perf_counter_start)
             if person:
                 # pprint(person)
-                print(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
+                logger.debug(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "student",
@@ -659,14 +703,15 @@ for sections in sections_raw_list:
                     "postal_code": None, #to be coded later for actual address if needed
                     "student_major": None, #to be coded later if needed
                     "student_grade_level": "unclassified", #to be coded later if needed
-                    "course_number": course_dict['number'].strip()[:100],
+                    "course_number": sections_dict['code'].strip()[:100],
                     "term_code": sections_dict['term_code'].strip()[:20],
                     "term_desc": terms[sections_dict['term_code']]["title"].strip()[:150],
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                print(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
+                logger.debug(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
 # Person processing time statistics
+logger.info(f"\nPerson API Call Statistics:")
 if person_times:
     total_time = sum(person_times)
     average_time = statistics.mean(person_times)
@@ -675,24 +720,24 @@ if person_times:
     med = statistics.median(person_times)
     mdev = statistics.median([abs(x - med) for x in person_times])
 
-    print(f"\nPerson API Call Statistics:")
-    print(f"Total persons processed: {len(person_times)}")
-    print(f"Total time taken: {total_time:.4f} seconds")
-    print(f"Average time per person: {average_time:.4f} seconds")
-    print(f"Stdev: {statistics.stdev(person_times):.4f}s")
-    print(f"Max time for a single person: {max_time:.4f} seconds")
-    print(f"Min time for a single person: {min_time:.4f} seconds")
-    print(f"Median time for a single person: {med:.4f} seconds")
-    print(f"Median absolute deviation: {mdev:.4f} seconds")
+    
+    logger.info(f"Total persons processed: {len(person_times)}")
+    logger.info(f"Total time taken: {total_time:.4f} seconds")
+    logger.info(f"Average time per person: {average_time:.4f} seconds")
+    logger.info(f"Stdev: {statistics.stdev(person_times):.4f}s")
+    logger.info(f"Max time for a single person: {max_time:.4f} seconds")
+    logger.info(f"Min time for a single person: {min_time:.4f} seconds")
+    logger.info(f"Median time for a single person: {med:.4f} seconds")
+    logger.info(f"Median absolute deviation: {mdev:.4f} seconds")
 
-print(f"Total number of persons processed: {personCounter}")   
+logger.info(f"Total number of persons processed: {personCounter}")   
 
 try:
     final_path = create_csv_from_dict_list(user_list, "user")
     user_file_path = final_path
     print(f"Successfully created CSV at: {final_path}")
 except ValueError as e:
-    print(f"Error: {e}")
+    logger.error(f"Error: {e}",exc_info=True)
 
 # for  user in user_list:
 #     print(user)
@@ -703,12 +748,12 @@ try:
     send_file_via_sftp(course_file_path, f"TEST/course/{course_file_path.name}")
     send_file_via_sftp(user_file_path, f"TEST/user/{user_file_path.name}")
 except Exception as e:
-    print(f"Error during SFTP file upload: {e}")    
+    logger.error(f"Error during SFTP file upload: {e}",exc_info=True)    
 
 # End timer
 end_time = time.time()
 
 # Calculate and display runtime
 elapsed = end_time - start_time
-print(f"Runtime: {format_runtime(elapsed)}")
-print("End")
+logger.info(f"Runtime: {format_runtime(elapsed)}")
+logger.info("End")
