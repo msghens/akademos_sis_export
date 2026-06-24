@@ -30,9 +30,23 @@ def setup_logging():
 
     log_file = log_dir / "akademos_sis_export.log"
 
+    # Get log level from environment variable (default: INFO)
+    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper().strip()
+    # Map string levels to logging constants
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "WARN": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+
+    log_level = level_map.get(log_level_str, logging.INFO)
+
     # Create logger
     logger = logging.getLogger("akademos_sis")
-    logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logging
+    logger.setLevel(log_level)
 
     # Remove existing handlers to avoid duplicates
     if logger.hasHandlers():
