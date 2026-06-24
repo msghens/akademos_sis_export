@@ -523,7 +523,7 @@ for period in academicPeriodIterator:
 # prep terms for csv export
 term_list = []  
 for code, details in terms.items():
-    logger.debug
+    logger.debug(f"Term: {code}, Startdate {details['startOn']}, Enddate {details['endOn']}, Registration {details['registration']}")
     term_list.append({
         "term_code": code.strip()[:20],
         "start_date": details["startOn"].split('T')[0],
@@ -599,7 +599,7 @@ for code, details in terms.items():
             "end_date": sections_dict["endOn"].split('T')[0],
             "enrollment_cap": int(str(sections_dict['maxEnrollment'])[:4] if str(sections_dict['maxEnrollment']) else 0)
         })
-        logger.debug( sections_dict['guid'], "course_number:", course_dict['number'], "course_title:", course_dict['title'], "course_name:", subject_dict['abbreviation'], "course_code:", sections_dict['code'], "term_code:", code, "term_desc:", terms[code]["title"], "start_date:", sections_dict["startOn"].split('T')[0], "end_date:", sections_dict["endOn"].split('T')[0], "enrollment_cap:", sections_dict['maxEnrollment'])
+        logger.debug(f"Section: {sections_dict['code']} - {sections_dict['title']} - Term: {code} - Startdate {sections_dict['startOn']} - Enddate {sections_dict['endOn']} - Enrollment Cap: {sections_dict['maxEnrollment']}")
         # Break if we've reached the limit. For testing purposes, we'll limit to 10 sections
         # if number_of_sections > 10:
         #     break
@@ -670,7 +670,7 @@ for sections in sections_raw_list:
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                logger.debug(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Professor ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
+                logger.debug
     # Get section enrollments
     params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
     enrollmentIterator = ethosClient.getResourceIterator(
@@ -722,7 +722,7 @@ for sections in sections_raw_list:
                     "username": get_banner_username(person)
                 })
                 personCounter += 1
-                logger.debug(f"Person: {personCounter} - User: {person['names'][0]['firstName']} {person['names'][0]['lastName']} Role: Student ({personResourceID}) {get_banner_id(person)} - Email: {person['emails'][0]['address'] if person['emails'] else None} - Term: {sections_dict['term_code']} {terms[sections_dict['term_code']]["title"]} - Username: {get_banner_username(person)}")
+                logger.debug(f"Added person ID: {personResourceID} to user list. Total persons processed: {personCounter}")
 # Person processing time statistics
 logger.info(f"\nPerson API Call Statistics:")
 if person_times:
