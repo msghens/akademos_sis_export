@@ -640,6 +640,9 @@ for sections in sections_raw_list:
             person_times.append(time.perf_counter() - perf_counter_start)
             if person:
                 logger.info(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
+                #Fix first name to have None instead of a '.'
+                if person['names'][0]['firstName'].strip() == ".":
+                    person['names'][0]['firstName'] = None
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "professor",
@@ -689,6 +692,9 @@ for sections in sections_raw_list:
             if person:
                 # pprint(person)
                 logger.debug(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
+                #Fix first name to have None instead of a '.'
+                if person['names'][0]['firstName'].strip() == ".":
+                    person['names'][0]['firstName'] = None
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "student",
