@@ -65,7 +65,7 @@ def setup_logging():
 logger = setup_logging()
 
 # Start timer
-start_time = time.time()
+start_time = time.monotonic()
 logger.info("Starting Akademos SIS Export...")
 
 ### Akademos SIS Export
@@ -757,7 +757,7 @@ except Exception as e:
     logger.error(f"Error during SFTP file upload: {e}",exc_info=True)    
 
 # End timer
-end_time = time.time()
+end_time = time.monotonic()
 
 # Calculate and display runtime
 elapsed = end_time - start_time
