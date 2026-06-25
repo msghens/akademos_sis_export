@@ -1,3 +1,4 @@
+import concurrent.futures
 import csv
 import datetime
 import logging
@@ -7,6 +8,7 @@ import socket
 import statistics
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pprint import pprint
 from typing import Any, Dict, List, Optional, Union
@@ -658,142 +660,180 @@ except ValueError as e:
 
 logger.info(f"Number of sections: {number_of_sections}")
 
-# create user csv 
-#start with instuctor first.
-# create a list of instructors to be exported to a users CSV
-user_list = []
-# list of time.perf_counter() to measure the time taken for each person api call
-person_times = []
-personCounter = 0;
+# ====================== CONCURRENT PERSON FETCHING ======================
+
 logger.info(f"Fetching instructors and students for each section")
+
+# Step 1: Collect ALL unique person IDs first
+all_person_ids = set()
+instructor_data = []   # Store (section, person_id) for later
+enrollment_data = []   # Store (section, person_id) for later
+
 for sections in sections_raw_list:
     sections_dict = sections.dict
     if sections_dict is None:
         continue
-    course_dict = get_course(sections_dict['course']['id'])
-    subject_dict = get_subject(course_dict['subject']['id'])    
-    # Get section instructors
-    params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
+
+    term_code = sections_dict.get('term_code')
+    course_code = sections_dict['code'].strip()[:100]
+    term_desc = terms[term_code]["title"].strip()[:150]
+
+    # === Collect Instructors ===
+    params["criteria"] = f'{{"section": {{"id": "{sections_dict["guid"]}"}}}}'
     instructorIterator = ethosClient.getResourceIterator(
         loginSession=loginSession,
         resourceName="section-instructors",
         version="10",
         params=params
     )
-    
-    # Process each instructor and add them to the user list
-    duplicate_instructor_ids = set()  # To track already processed instructors for this section
-    for instructor in instructorIterator:
-        personResourceID = instructor.dict.get('instructor', {}).get('id') # type: ignore
-        if personResourceID and personResourceID not in duplicate_instructor_ids:
-            duplicate_instructor_ids.add(personResourceID)  # Mark this instructor as processed
 
-            perf_counter_start = time.perf_counter()
-            person = get_person(personResourceID)
-            person_times.append(time.perf_counter() - perf_counter_start)
-            if person:
-                logger.debug(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
-                #Fix first name to have None instead of a '.'
-                person['names'][0]['firstName']=person['names'][0]['firstName'].strip()[:150] # None create error for first name if it is a '.' so we will fix it here to have None instead of a '.'
-                if person['names'][0]['firstName'].strip() == ".":
-                    person['names'][0]['firstName'] = None
-                user_list.append({
-                    "id": get_banner_id(person),
-                    "role": "professor",
-                    "first_name": person['names'][0]['firstName'],
-                    "last_name": person['names'][0]['lastName'].strip()[:150],
-                    "email": get_banner_username(person) + "@pipeline.sbcc.edu",
-                    "phone_number": None,
-                    "address_line1": None,
-                    "address_line_2": None,
-                    "city": None,
-                    "state": None,
-                    "postal_code": None,
-                    "student_major": None,
-                    "student_grade_level": None,
-                    "course_number": sections_dict['code'].strip()[:100],
-                    "term_code": sections_dict['term_code'].strip()[:20],
-                    "term_desc": terms[sections_dict['term_code']]["title"].strip()[:150],
-                    "username": get_banner_username(person)
-                })
-                personCounter += 1
-                logger.debug
-    # Get section enrollments
-    params["criteria"] = "{\"section\": {\"id\": \"" + sections_dict['guid'] + "\"}}"
+    for instructor in instructorIterator:
+        person_id = instructor.dict.get('instructor', {}).get('id')
+        if person_id:
+            all_person_ids.add(person_id)
+            instructor_data.append({
+                'person_id': person_id,
+                'section_dict': sections_dict,
+                'course_code': course_code,
+                'term_code': term_code,
+                'term_desc': term_desc
+            })
+
+    # === Collect Students ===
     enrollmentIterator = ethosClient.getResourceIterator(
         loginSession=loginSession,
         resourceName="section-registrations",
         version="16",
         params=params
     )
-    
-    # Process each enrollment and add them to the user list
-    duplicate_enrollment_ids = set()  # To track already processed enrollments for this section
+
     for enrollment in enrollmentIterator:
         enrollment_dict = enrollment.dict
         if enrollment_dict is None:
             continue
-        logger.debug(f"Processing enrollment: {enrollment_dict['id']} for section {sections_dict['code']} term {terms[sections_dict['term_code']]['title']}")
-        if enrollment_dict.get('status').get('registrationStatus') != "registered":
-            logger.debug(f"Skipping enrollment {enrollment_dict['id']} for person {enrollment_dict.get('registrant', {}).get('id')} because registration status is {enrollment_dict.get('status').get('registrationStatus')}")
+        if enrollment_dict.get('status', {}).get('registrationStatus') != "registered":
             continue
-        personResourceID = enrollment_dict.get('registrant', {}).get('id')
-        if personResourceID and personResourceID not in duplicate_enrollment_ids:
-            duplicate_enrollment_ids.add(personResourceID)  # Mark this enrollment as processed
-            perf_counter_start = time.perf_counter()
-            person = get_person(personResourceID)
-            person_times.append(time.perf_counter() - perf_counter_start)
-            if person:
-                # pprint(person)
-                logger.debug(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
-                #Fix first name to have None instead of a '.'
-                person['names'][0]['firstName']=person['names'][0]['firstName'].strip()[:150] # None create error for first name if it is a '.' so we will fix it here to have None instead of a '.'
-                if person['names'][0]['firstName'].strip() == ".":
-                    person['names'][0]['firstName'] = None
-                user_list.append({
-                    "id": get_banner_id(person),
-                    "role": "student",
-                    "first_name": person['names'][0]['firstName'].strip()[:150],
-                    "last_name": person['names'][0]['lastName'].strip()[:150],
-                    "email": get_banner_username(person) + "@pipeline.sbcc.edu",
-                    "phone_number": None,
-                    "address_line1": None, #to be coded later for actual address if needed
-                    "address_line_2": None, #to be coded later for actual address if needed
-                    "city": None, #to be coded later for actual address if needed
-                    "state": None, #to be coded later for actual address if needed
-                    "postal_code": None, #to be coded later for actual address if needed
-                    "student_major": None, #to be coded later if needed
-                    "student_grade_level": "unclassified", #to be coded later if needed
-                    "course_number": sections_dict['code'].strip()[:100],
-                    "term_code": sections_dict['term_code'].strip()[:20],
-                    "term_desc": terms[sections_dict['term_code']]["title"].strip()[:150],
-                    "username": get_banner_username(person)
-                })
-                personCounter += 1
-                logger.debug(f"Added person ID: {personResourceID} to user list. Total persons processed: {personCounter}")
-# Person processing time statistics
-logger.info(f"\nPerson API Call Statistics:")
-logger.info(f"Removed outliers using Modified Z-Score method with threshold 3.5")
-person_times=remove_outliers_modified_z(person_times, threshold=3.5)
-if person_times:
-    total_time = sum(person_times)
-    average_time = statistics.mean(person_times)
-    max_time = max(person_times)
-    min_time = min(person_times)
-    med = statistics.median(person_times)
-    mdev = statistics.median([abs(x - med) for x in person_times])
 
+        person_id = enrollment_dict.get('registrant', {}).get('id')
+        if person_id:
+            all_person_ids.add(person_id)
+            enrollment_data.append({
+                'person_id': person_id,
+                'section_dict': sections_dict,
+                'course_code': course_code,
+                'term_code': term_code,
+                'term_desc': term_desc
+            })
+
+logger.info(f"Found {len(all_person_ids)} unique persons to fetch "
+            f"({len(instructor_data)} instructor roles, {len(enrollment_data)} student enrollments)")
+
+# Step 2: Fetch all persons concurrently
+def fetch_person(person_id: str) -> dict:
+    """Wrapper for get_person to be used in ThreadPoolExecutor"""
+    try:
+        time.sleep(0.05)  # Small delay to avoid overwhelming the API
+        return get_person(person_id)
+    except Exception as e:
+        logger.error(f"Failed to fetch person {person_id}: {e}", exc_info=True)
+        return {}
+
+logger.info(f"Starting concurrent fetch of {len(all_person_ids)} persons...")
+
+persons_dict: Dict[str, dict] = {}
+
+with ThreadPoolExecutor(max_workers=25) as executor:   # Tune this number (15-40 is usually good)
+    future_to_pid = {executor.submit(fetch_person, pid): pid for pid in all_person_ids}
     
-    logger.info(f"Total persons processed: {len(person_times)}")
-    logger.info(f"Total time taken: {total_time:.4f} seconds")
-    logger.info(f"Average time per person: {average_time:.4f} seconds")
-    logger.info(f"Stdev: {statistics.stdev(person_times):.4f}s")
-    logger.info(f"Max time for a single person: {max_time:.4f} seconds")
-    logger.info(f"Min time for a single person: {min_time:.4f} seconds")
-    logger.info(f"Median time for a single person: {med:.4f} seconds")
-    logger.info(f"Median absolute deviation: {mdev:.4f} seconds")
+    for future in concurrent.futures.as_completed(future_to_pid):
+        pid = future_to_pid[future]
+        try:
+            persons_dict[pid] = future.result()
+        except Exception as e:
+            logger.error(f"Exception fetching person {pid}: {e}")
+            persons_dict[pid] = {}
 
-logger.info(f"Total number of persons processed: {personCounter}")   
+logger.info(f"Successfully fetched {len(persons_dict)} persons")
+
+# Step 3: Build user_list using pre-fetched persons
+user_list = []
+personCounter = 0
+
+# Process Instructors
+for data in instructor_data:
+    person = persons_dict.get(data['person_id'], {})
+    if not person:
+        continue
+
+    banner_id = get_banner_id(person)
+    banner_username = get_banner_username(person)
+
+    # Fix first name edge case
+    first_name = person.get('names', [{}])[0].get('firstName', '')
+    if isinstance(first_name, str):
+        first_name = first_name.strip()[:150]
+        if first_name == ".":
+            first_name = None
+
+    user_list.append({
+        "id": banner_id,
+        "role": "professor",
+        "first_name": first_name,
+        "last_name": person.get('names', [{}])[0].get('lastName', '').strip()[:150],
+        "email": f"{banner_username}@pipeline.sbcc.edu" if banner_username else None,
+        "phone_number": None,
+        "address_line1": None,
+        "address_line_2": None,
+        "city": None,
+        "state": None,
+        "postal_code": None,
+        "student_major": None,
+        "student_grade_level": None,
+        "course_number": data['course_code'],
+        "term_code": data['term_code'],
+        "term_desc": data['term_desc'],
+        "username": banner_username
+    })
+    personCounter += 1
+
+# Process Students
+for data in enrollment_data:
+    person = persons_dict.get(data['person_id'], {})
+    if not person:
+        continue
+
+    banner_id = get_banner_id(person)
+    banner_username = get_banner_username(person)
+
+    first_name = person.get('names', [{}])[0].get('firstName', '')
+    if isinstance(first_name, str):
+        first_name = first_name.strip()[:150]
+        if first_name == ".":
+            first_name = None
+
+    user_list.append({
+        "id": banner_id,
+        "role": "student",
+        "first_name": first_name,
+        "last_name": person.get('names', [{}])[0].get('lastName', '').strip()[:150],
+        "email": f"{banner_username}@pipeline.sbcc.edu" if banner_username else None,
+        "phone_number": None,
+        "address_line1": None,
+        "address_line_2": None,
+        "city": None,
+        "state": None,
+        "postal_code": None,
+        "student_major": None,
+        "student_grade_level": "unclassified",
+        "course_number": data['course_code'],
+        "term_code": data['term_code'],
+        "term_desc": data['term_desc'],
+        "username": banner_username
+    })
+    personCounter += 1
+
+logger.info(f"Total persons added to user list: {personCounter}")
+
 
 try:
     final_path = create_csv_from_dict_list(user_list, "user")
