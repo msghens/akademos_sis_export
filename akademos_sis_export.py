@@ -648,12 +648,13 @@ for sections in sections_raw_list:
             if person:
                 logger.debug(f"Processing enrollment for person ID: {personResourceID} PROFESSOR)")
                 #Fix first name to have None instead of a '.'
+                person['names'][0]['firstName']=person['names'][0]['firstName'].strip()[:150] # None create error for first name if it is a '.' so we will fix it here to have None instead of a '.'
                 if person['names'][0]['firstName'].strip() == ".":
                     person['names'][0]['firstName'] = None
                 user_list.append({
                     "id": get_banner_id(person),
                     "role": "professor",
-                    "first_name": person['names'][0]['firstName'].strip()[:150],
+                    "first_name": person['names'][0]['firstName'],
                     "last_name": person['names'][0]['lastName'].strip()[:150],
                     "email": get_banner_username(person) + "@pipeline.sbcc.edu",
                     "phone_number": None,
@@ -700,6 +701,7 @@ for sections in sections_raw_list:
                 # pprint(person)
                 logger.debug(f"Processing enrollment for person ID: {personResourceID} STUDENT)")
                 #Fix first name to have None instead of a '.'
+                person['names'][0]['firstName']=person['names'][0]['firstName'].strip()[:150] # None create error for first name if it is a '.' so we will fix it here to have None instead of a '.'
                 if person['names'][0]['firstName'].strip() == ".":
                     person['names'][0]['firstName'] = None
                 user_list.append({
