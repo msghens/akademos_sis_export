@@ -73,7 +73,7 @@ def setup_logging():
     # Rotating File Handler
     file_handler = logging.handlers.RotatingFileHandler(
         log_file,
-        maxBytes=5 * 1024 * 1024,   # 5 MB
+        maxBytes=10 * 1024 * 1024,   # 10 MB
         backupCount=5,
         encoding='utf-8'
     )
@@ -105,6 +105,52 @@ ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
 # Initialize the Ethos API client and obtain a login session using the API key
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
 loginSession = ethosClient.getLoginSessionFromAPIKey(apiKey=ethosAppAPIKey)
+
+
+## Remove outliers using the Modified Z-Score method
+def remove_outliers_modified_z(data, threshold=3.5):
+    """
+    Remove outliers using the Modified Z-Score method.
+    
+    Parameters:
+        data (list): List of numeric values.
+        threshold (float): Modified Z-score cutoff (default 3.5).
+    
+    Returns:
+        list: Data without outliers.
+    """
+    if not data:
+        return []
+
+    # Ensure all elements are numeric
+    try:
+        data = [float(x) for x in data]
+    except ValueError:
+        logger.error("All elements in the data list must be numeric.", exc_info=True)
+        raise ValueError("All elements must be numeric.")
+
+    median_val = statistics.median(data)
+
+    # Calculate Median Absolute Deviation (MAD)
+    abs_devs = [abs(x - median_val) for x in data]
+    mad = statistics.median(abs_devs)
+
+    if mad == 0:
+        return data  # No variation, so no outliers
+
+    # Calculate Modified Z-Scores
+    # Formula: MZ = 0.6745 * (x - median) / MAD
+    modified_z_scores = [
+        0.6745 * (x - median_val) / mad for x in data
+    ]
+
+    # Filter based on threshold
+    filtered = [
+        x for x, mz in zip(data, modified_z_scores)
+        if abs(mz) <= threshold
+    ]
+    return filtered
+
 
 def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     """
@@ -727,6 +773,8 @@ for sections in sections_raw_list:
                 logger.debug(f"Added person ID: {personResourceID} to user list. Total persons processed: {personCounter}")
 # Person processing time statistics
 logger.info(f"\nPerson API Call Statistics:")
+logger.info(f"Removed outliers using Modified Z-Score method with threshold 3.5")
+person_times=remove_outliers_modified_z(person_times, threshold=3.5)
 if person_times:
     total_time = sum(person_times)
     average_time = statistics.mean(person_times)
