@@ -666,8 +666,8 @@ logger.info(f"Fetching instructors and students for each section")
 
 # Step 1: Collect ALL unique person IDs first
 all_person_ids = set()
-instructor_data = []   # Store (section, person_id) for later
-enrollment_data = []   # Store (section, person_id) for later
+instructor_data = []
+enrollment_data = []
 
 for sections in sections_raw_list:
     sections_dict = sections.dict
@@ -678,7 +678,7 @@ for sections in sections_raw_list:
     course_code = sections_dict['code'].strip()[:100]
     term_desc = terms[term_code]["title"].strip()[:150]
 
-    # === Collect Instructors ===
+    # === Instructors ===
     params["criteria"] = f'{{"section": {{"id": "{sections_dict["guid"]}"}}}}'
     instructorIterator = ethosClient.getResourceIterator(
         loginSession=loginSession,
@@ -699,7 +699,7 @@ for sections in sections_raw_list:
                 'term_desc': term_desc
             })
 
-    # === Collect Students ===
+    # === Students ===
     enrollmentIterator = ethosClient.getResourceIterator(
         loginSession=loginSession,
         resourceName="section-registrations",
@@ -725,39 +725,83 @@ for sections in sections_raw_list:
                 'term_desc': term_desc
             })
 
-logger.info(f"Found {len(all_person_ids)} unique persons to fetch "
+total_persons = len(all_person_ids)
+logger.info(f"Found {total_persons} unique persons "
             f"({len(instructor_data)} instructor roles, {len(enrollment_data)} student enrollments)")
 
-# Step 2: Fetch all persons concurrently
-def fetch_person(person_id: str) -> dict:
-    """Wrapper for get_person to be used in ThreadPoolExecutor"""
+# Configuration from environment
+max_workers = int(os.getenv("PERSON_FETCH_WORKERS", 25))
+progress_interval = int(os.getenv("PERSON_PROGRESS_INTERVAL", 100))
+
+logger.info(f"Using {max_workers} worker threads | Progress every {progress_interval} persons")
+
+# Step 2: Concurrent Fetch with Timing + Progress
+def fetch_person(person_id: str) -> tuple[dict, float]:
+    start = time.perf_counter()
     try:
-        time.sleep(0.05)  # Small delay to avoid overwhelming the API
-        return get_person(person_id)
+        person = get_person(person_id)
+        return person, time.perf_counter() - start
     except Exception as e:
         logger.error(f"Failed to fetch person {person_id}: {e}", exc_info=True)
-        return {}
+        return {}, time.perf_counter() - start
 
-logger.info(f"Starting concurrent fetch of {len(all_person_ids)} persons...")
+
+logger.info(f"Starting concurrent fetch of {total_persons} persons...")
 
 persons_dict: Dict[str, dict] = {}
+person_times: List[float] = []
+processed_count = 0
 
-with ThreadPoolExecutor(max_workers=25) as executor:   # Tune this number (15-40 is usually good)
+with ThreadPoolExecutor(max_workers=max_workers) as executor:
     future_to_pid = {executor.submit(fetch_person, pid): pid for pid in all_person_ids}
     
     for future in concurrent.futures.as_completed(future_to_pid):
         pid = future_to_pid[future]
         try:
-            persons_dict[pid] = future.result()
+            person, elapsed = future.result()
+            persons_dict[pid] = person
+            person_times.append(elapsed)
         except Exception as e:
             logger.error(f"Exception fetching person {pid}: {e}")
             persons_dict[pid] = {}
+            person_times.append(0.0)
+        
+        processed_count += 1
+        if processed_count % progress_interval == 0:
+            logger.info(f"Progress: {processed_count}/{total_persons} persons fetched "
+                       f"({(processed_count/total_persons)*100:.1f}%)")
 
-logger.info(f"Successfully fetched {len(persons_dict)} persons")
+logger.info(f"Completed fetching {len(persons_dict)} persons")
 
-# Step 3: Build user_list using pre-fetched persons
+# ====================== PERSON API CALL STATISTICS ======================
+if person_times:
+    logger.info("\n=== Person API Call Statistics (Concurrent) ===")
+    clean_times = remove_outliers_modified_z(person_times, threshold=3.5)
+    if clean_times:
+        total_time = sum(clean_times)
+        avg_time = statistics.mean(clean_times)
+        med_time = statistics.median(clean_times)
+        max_time = max(clean_times)
+        min_time = min(clean_times)
+        
+        logger.info(f"Total persons processed: {len(person_times)}")
+        logger.info(f"Total API time (cleaned): {total_time:.4f} seconds")
+        logger.info(f"Average time per person: {avg_time:.4f} seconds")
+        logger.info(f"Median time per person: {med_time:.4f} seconds")
+        logger.info(f"Fastest: {min_time:.4f}s | Slowest: {max_time:.4f}s")
+        if len(clean_times) > 1:
+            try:
+                logger.info(f"Stdev: {statistics.stdev(clean_times):.4f}s")
+            except:
+                pass
+
+# Step 3: Build user_list WITH DEDUPLICATION + SKIP LOGGING
 user_list = []
 personCounter = 0
+duplicate_counter = 0
+
+# Use a set to track unique (id, role, course_number, term_code)
+seen = set()
 
 # Process Instructors
 for data in instructor_data:
@@ -766,14 +810,25 @@ for data in instructor_data:
         continue
 
     banner_id = get_banner_id(person)
+    if not banner_id:
+        continue
+
     banner_username = get_banner_username(person)
 
-    # Fix first name edge case
     first_name = person.get('names', [{}])[0].get('firstName', '')
     if isinstance(first_name, str):
         first_name = first_name.strip()[:150]
         if first_name == ".":
             first_name = None
+
+    key = (banner_id, "professor", data['course_code'], data['term_code'])
+    
+    if key in seen:
+        duplicate_counter += 1
+        logger.debug(f"Skipped duplicate instructor - ID: {banner_id}, Section: {data['course_code']}, Term: {data['term_code']}")
+        continue
+    
+    seen.add(key)
 
     user_list.append({
         "id": banner_id,
@@ -803,6 +858,9 @@ for data in enrollment_data:
         continue
 
     banner_id = get_banner_id(person)
+    if not banner_id:
+        continue
+
     banner_username = get_banner_username(person)
 
     first_name = person.get('names', [{}])[0].get('firstName', '')
@@ -810,6 +868,15 @@ for data in enrollment_data:
         first_name = first_name.strip()[:150]
         if first_name == ".":
             first_name = None
+
+    key = (banner_id, "student", data['course_code'], data['term_code'])
+    
+    if key in seen:
+        duplicate_counter += 1
+        logger.debug(f"Skipped duplicate student - ID: {banner_id}, Section: {data['course_code']}, Term: {data['term_code']}")
+        continue
+    
+    seen.add(key)
 
     user_list.append({
         "id": banner_id,
@@ -832,6 +899,14 @@ for data in enrollment_data:
     })
     personCounter += 1
 
+# Final summary logging
+logger.info(f"Total persons added to user list after deduplication: {personCounter}")
+if duplicate_counter > 0:
+    logger.info(f"Skipped {duplicate_counter} duplicate entries (same person + role + section + term)")
+else:
+    logger.info("No duplicates found.")
+
+logger.debug(f"Total unique keys tracked: {len(seen)}")
 logger.info(f"Total persons added to user list: {personCounter}")
 
 
