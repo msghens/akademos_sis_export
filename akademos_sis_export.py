@@ -431,6 +431,10 @@ if person_times:
     clean_times = remove_outliers_modified_z(person_times)
     if clean_times:
         logger.info(f"Processed {len(clean_times)} persons | Avg: {statistics.mean(clean_times):.4f}s")
+        logger.info(f"Min: {min(clean_times):.4f}s | Max: {max(clean_times):.4f}s | Median: {statistics.median(clean_times):.4f}s")
+        logger.info(f"Std Dev: {statistics.stdev(clean_times):.4f}s | 25th Percentile: {statistics.quantiles(clean_times, n=4)[0]:.4f}s | 75th Percentile: {statistics.quantiles(clean_times, n=4)[2]:.4f}s")
+        logger.info(f"Total API time: {sum(clean_times):.4f}s | Total calls: {len(clean_times)}")
+        logger.info(f"Total elapsed time: {time.perf_counter() - start_time:.4f}s")
 
 # Build user_list with deduplication
 user_list: List[Dict[str, Any]] = []
