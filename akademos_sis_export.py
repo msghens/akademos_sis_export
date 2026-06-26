@@ -7,7 +7,7 @@ import socket
 import statistics
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -20,7 +20,6 @@ from dotenv import load_dotenv
 
 # ====================== LOGGING SETUP ======================
 def setup_logging() -> logging.Logger:
-    """Production-ready logging configuration."""
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "akademos_sis_export.log"
@@ -37,13 +36,11 @@ def setup_logging() -> logging.Logger:
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
-    # Console Handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(os.getenv("LOG_LEVEL_CONSOLE", "INFO").upper())
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # Rotating File Handler
     file_handler = logging.handlers.RotatingFileHandler(
         filename=log_file,
         maxBytes=10 * 1024 * 1024,
@@ -55,7 +52,6 @@ def setup_logging() -> logging.Logger:
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    # Silence noisy libraries
     for lib in ["paramiko", "urllib3", "requests", "EllucianEthosPythonClient"]:
         logging.getLogger(lib).setLevel(logging.WARNING)
 
@@ -63,35 +59,28 @@ def setup_logging() -> logging.Logger:
     return logger
 
 
-# Load environment variables
 load_dotenv()
-
-# Initialize logger
 logger = setup_logging()
 
-# Start timer
 start_time = time.monotonic()
 logger.info("=== Starting Akademos SIS Export ===")
 logger.info(f"Python version: {sys.version.split()[0]}")
 
-# Global caches
 courseCache: Dict[str, dict] = {}
 subjectCache: Dict[str, dict] = {}
 personCache: Dict[str, dict] = {}
 
-# Ethos API setup
 ethosBaseURL = os.environ["ETHOSBASEURL"]
 ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
 
-# Initialize Ethos API client
 ethosClient = EllucianEthosPythonClient.EllucianEthosAPIClient(baseURL=ethosBaseURL)
 loginSession = ethosClient.getLoginSessionFromAPIKey(apiKey=ethosAppAPIKey)
 
 logger.info("Ethos API client initialized successfully")
 
 
-# ====================== HELPER FUNCTIONS ======================
-def remove_outliers_modified_z(data, threshold=3.5):
+# ====================== HELPERS ======================
+def remove_outliers_modified_z(data: List, threshold: float = 3.5) -> List[float]:
     if not data:
         return []
     try:
@@ -99,49 +88,49 @@ def remove_outliers_modified_z(data, threshold=3.5):
     except ValueError:
         logger.error("All elements in data list must be numeric", exc_info=True)
         raise
-
     median_val = statistics.median(data)
     abs_devs = [abs(x - median_val) for x in data]
     mad = statistics.median(abs_devs)
-
     if mad == 0:
         return data
-
     modified_z_scores = [0.6745 * (x - median_val) / mad for x in data]
-    filtered = [x for x, mz in zip(data, modified_z_scores) if abs(mz) <= threshold]
-    return filtered
+    return [x for x, mz in zip(data, modified_z_scores) if abs(mz) <= threshold]
 
 
-# SFTP Upload Function
 def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
-    """Upload file to SFTP server."""
     if not local_file_path.exists():
         logger.error(f"Local file not found: {local_file_path}")
         raise FileNotFoundError(f"Local file not found: {local_file_path}")
 
-    sftp_server = os.getenv("SFTPSERVER")
+    sftp_server: Optional[str] = os.getenv("SFTPSERVER")
     sftp_port = int(os.getenv("SFTPPORT", 22))
-    sftp_username = os.getenv("SFTPUSERNAME")
-    sftp_password = os.getenv("SFTPPASSWORD")
+    sftp_username: Optional[str] = os.getenv("SFTPUSERNAME")
+    sftp_password: Optional[str] = os.getenv("SFTPPASSWORD")
 
-    if not all([sftp_server, sftp_username, sftp_password]):
+    if not sftp_server or not sftp_username or not sftp_password:
         logger.error("Missing SFTP environment variables")
         raise ValueError("Missing SFTP credentials")
 
     ssh_client = None
     sftp = None
     try:
-        logger.info(f"Connecting to SFTP server {sftp_server}")
+        logger.info(f"Connecting to SFTP server {sftp_server}:{sftp_port}")
         ssh_client = paramiko.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh_client.connect(hostname=sftp_server, port=sftp_port, username=sftp_username,
-                           password=sftp_password, timeout=15)
-
+        ssh_client.connect(
+            hostname=sftp_server,
+            port=sftp_port,
+            username=sftp_username,
+            password=sftp_password,
+            timeout=15,
+            allow_agent=False,
+            look_for_keys=False
+        )
         sftp = ssh_client.open_sftp()
         sftp.put(str(local_file_path), remote_file_path)
-        logger.info(f"Successfully uploaded {local_file_path.name} to {remote_file_path}")
+        logger.info(f"Successfully uploaded {local_file_path.name}")
     except Exception as e:
-        logger.error(f"SFTP upload failed for {local_file_path.name}", exc_info=True)
+        logger.error(f"SFTP upload failed", exc_info=True)
         raise
     finally:
         if sftp:
@@ -150,17 +139,16 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
             ssh_client.close()
 
 
-# Humanize runtime for logging
 def format_runtime(seconds: float) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     millis = int((seconds - int(seconds)) * 1000)
     parts = []
-    if hours > 0: parts.append(f"{hours}h")
-    if minutes > 0: parts.append(f"{minutes}m")
-    if secs > 0: parts.append(f"{secs}s")
-    if millis > 0 and hours == 0: parts.append(f"{millis}ms")
+    if hours: parts.append(f"{hours}h")
+    if minutes: parts.append(f"{minutes}m")
+    if secs: parts.append(f"{secs}s")
+    if millis and not hours: parts.append(f"{millis}ms")
     return " ".join(parts) or "0s"
 
 
@@ -176,7 +164,6 @@ def get_end_date() -> str:
     return two_months_later.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-#===================== CSV CREATION FUNCTION ======================
 def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str) -> Path:
     if not data_list:
         raise ValueError("Input data_list cannot be empty.")
@@ -198,44 +185,43 @@ def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str)
 
 
 def find_greater(a: Optional[Union[int, float]], b: Optional[Union[int, float]]) -> Optional[Union[int, float]]:
-    if a is None and b is None: return None
-    if a is None: return b
-    if b is None: return a
+    if a is None and b is None:
+        return None
+    if a is None:
+        return b
+    if b is None:
+        return a
     return max(a, b)
 
 
-#
 def get_course(course_id: str) -> dict:
     if course_id in courseCache:
         return courseCache[course_id]
     course = ethosClient.getResource(loginSession=loginSession, resourceName="courses", resourceID=course_id)
-    result = course.dict if course else {}
+    result: dict = course.dict if course and course.dict is not None else {}
     courseCache[course_id] = result
     return result
 
 
-# Ethos API call to fetch subject details with caching
 def get_subject(subject_id: str) -> dict:
     if subject_id in subjectCache:
         return subjectCache[subject_id]
     subject = ethosClient.getResource(loginSession=loginSession, resourceName="subjects", resourceID=subject_id)
-    result = subject.dict if subject else {}
+    result: dict = subject.dict if subject and subject.dict is not None else {}
     subjectCache[subject_id] = result
     return result
 
 
-#
 def get_person(person_id: str) -> dict:
     if person_id in personCache:
         return personCache[person_id]
     person = ethosClient.getResource(loginSession=loginSession, resourceName="persons", resourceID=person_id)
-    result = person.dict if person else {}
+    result: dict = person.dict if person and person.dict is not None else {}
     if result:
         personCache[person_id] = result
     return result
 
 
-#====================== PERSON ATTRIBUTE EXTRACTION ======================
 def get_banner_id(person: dict) -> str:
     for credential in person.get('credentials', []):
         if credential.get('type') == 'bannerId':
@@ -243,7 +229,6 @@ def get_banner_id(person: dict) -> str:
     return ""
 
 
-#
 def get_banner_username(person: dict) -> str:
     for credential in person.get('credentials', []):
         if credential.get('type') == 'bannerUserName':
@@ -252,15 +237,14 @@ def get_banner_username(person: dict) -> str:
 
 
 # ====================== MAIN EXECUTION ======================
-params = {}
-params["criteria"] = '{"category":{"type":"term"},"registration":"open"}'
+params: Dict[str, str] = {"criteria": '{"category":{"type":"term"},"registration":"open"}'}
 
 logger.info("Fetching academic periods")
 academicPeriodIterator = ethosClient.getResourceIterator(
     loginSession=loginSession, resourceName="academic-periods", params=params, pageSize=100
 )
 
-terms = {}
+terms: Dict[str, Dict[str, Any]] = {}
 for period in academicPeriodIterator:
     period_dict = period.dict
     if period_dict:
@@ -272,8 +256,7 @@ for period in academicPeriodIterator:
             "title": period_dict['title']
         }
 
-# Terms CSV
-term_list = [
+term_list: List[Dict[str, str]] = [
     {
         "term_code": code.strip()[:20],
         "start_date": details["startOn"].split('T')[0],
@@ -288,15 +271,15 @@ try:
     logger.info(f"Created terms CSV: {terms_file_path.name}")
 except Exception as e:
     logger.error("Failed to create terms CSV", exc_info=True)
+    terms_file_path = None
 
 # Sections
-sections_raw_list = []
-sections_list = []
+sections_raw_list: List = []
+sections_list: List[Dict[str, Any]] = []
 number_of_sections = 0
 
 logger.info(f"Fetching sections for {len(terms)} terms")
 
-#===================== FETCH SECTIONS ======================
 for code, details in terms.items():
     params["criteria"] = f'{{"academicPeriod":{{"id":"{details["id"]}"}},"status":"open"}}'
     sectionsIterator = ethosClient.getResourceIterator(
@@ -318,11 +301,11 @@ for code, details in terms.items():
         )
 
         sections_list.append({
-            "course_number": sections_dict['code'].strip()[:100],
-            "course_title": sections_dict['title'].strip()[:100],
+            "course_number": sections_dict.get('code', '').strip()[:100],
+            "course_title": sections_dict.get('title', '').strip()[:100],
             "course_name": subject_dict.get('abbreviation', '').strip()[:60],
             "course_code": course_dict.get('number', '').strip()[:60],
-            "course_section": sections_dict['number'].strip()[:60],
+            "course_section": sections_dict.get('number', '').strip()[:60],
             "course_credit": str(course_credit)[:3] if course_credit else "0",
             "course_model": None,
             "department_code": subject_dict.get('abbreviation', '').strip()[:20],
@@ -343,15 +326,19 @@ try:
     logger.info(f"Created course CSV: {course_file_path.name}")
 except Exception as e:
     logger.error("Failed to create course CSV", exc_info=True)
+    course_file_path = None
 
 logger.info(f"Total sections processed: {number_of_sections}")
 
-# ====================== CONCURRENT PERSON FETCHING ======================
+# ====================== COLLECTION PHASE ======================
 logger.info("Collecting instructor and student records")
 
-all_person_ids = set()
-instructor_data = []
-enrollment_data = []
+all_person_ids: set[str] = set()
+instructor_data: List[Dict[str, Any]] = []
+enrollment_data: List[Dict[str, Any]] = []
+
+collection_interval = int(os.getenv("COLLECTION_PROGRESS_INTERVAL", 50))
+section_count = 0
 
 for sections in sections_raw_list:
     sections_dict = sections.dict
@@ -364,10 +351,13 @@ for sections in sections_raw_list:
 
     params["criteria"] = f'{{"section":{{"id":"{sections_dict.get("guid")}"}}}}'
 
-    # Instructors
+    # Instructors - FIXED
     for instructor in ethosClient.getResourceIterator(
             loginSession=loginSession, resourceName="section-instructors", version="10", params=params):
-        pid = instructor.dict.get('instructor', {}).get('id')
+        instructor_dict = instructor.dict
+        if instructor_dict is None:
+            continue
+        pid = instructor_dict.get('instructor', {}).get('id')
         if pid:
             all_person_ids.add(pid)
             instructor_data.append({
@@ -375,11 +365,13 @@ for sections in sections_raw_list:
                 'term_code': term_code, 'term_desc': term_desc
             })
 
-    # Students
+    # Students - FIXED
     for enrollment in ethosClient.getResourceIterator(
             loginSession=loginSession, resourceName="section-registrations", version="16", params=params):
         enrollment_dict = enrollment.dict
-        if not enrollment_dict or enrollment_dict.get('status', {}).get('registrationStatus') != "registered":
+        if enrollment_dict is None:
+            continue
+        if enrollment_dict.get('status', {}).get('registrationStatus') != "registered":
             continue
         pid = enrollment_dict.get('registrant', {}).get('id')
         if pid:
@@ -389,13 +381,18 @@ for sections in sections_raw_list:
                 'term_code': term_code, 'term_desc': term_desc
             })
 
-total_persons = len(all_person_ids)
-logger.info(f"Found {total_persons} unique persons")
+    section_count += 1
+    if section_count % collection_interval == 0:
+        logger.info(f"Collection progress: {section_count}/{len(sections_raw_list)} sections | "
+                    f"{len(all_person_ids)} unique persons found")
 
+total_persons = len(all_person_ids)
+logger.info(f"Collection completed - Found {total_persons} unique persons")
+
+# ====================== CONCURRENT FETCH ======================
 max_workers = int(os.getenv("PERSON_FETCH_WORKERS", 25))
 progress_interval = int(os.getenv("PERSON_PROGRESS_INTERVAL", 100))
 
-#===================== CONCURRENT FETCH FUNCTION ======================
 def fetch_person(person_id: str):
     start = time.perf_counter()
     try:
@@ -405,15 +402,14 @@ def fetch_person(person_id: str):
         logger.error(f"Failed to fetch person {person_id}", exc_info=True)
         return {}, time.perf_counter() - start
 
-persons_dict = {}
-person_times = []
+persons_dict: Dict[str, dict] = {}
+person_times: List[float] = []
 processed_count = 0
 
-#====================== CONCURRENT FETCH ======================
 logger.info(f"Starting concurrent fetch with {max_workers} workers")
 with ThreadPoolExecutor(max_workers=max_workers) as executor:
     future_to_pid = {executor.submit(fetch_person, pid): pid for pid in all_person_ids}
-    for future in concurrent.futures.as_completed(future_to_pid):
+    for future in as_completed(future_to_pid):
         pid = future_to_pid[future]
         try:
             person, elapsed = future.result()
@@ -425,21 +421,21 @@ with ThreadPoolExecutor(max_workers=max_workers) as executor:
 
         processed_count += 1
         if processed_count % progress_interval == 0:
-            pct = (processed_count / total_persons) * 100
-            logger.info(f"Progress: {processed_count}/{total_persons} persons ({pct:.1f}%)")
+            pct = (processed_count / total_persons) * 100 if total_persons > 0 else 0
+            logger.info(f"Fetch progress: {processed_count}/{total_persons} persons ({pct:.1f}%)")
 
 # Person statistics
 if person_times:
     logger.info("=== Person API Call Statistics ===")
-    clean_times = remove_outliers_modified_z(person_times, 3.5)
+    clean_times = remove_outliers_modified_z(person_times)
     if clean_times:
-        logger.info(f"Total persons: {len(person_times)} | Avg: {statistics.mean(clean_times):.4f}s | Median: {statistics.median(clean_times):.4f}s")
+        logger.info(f"Processed {len(clean_times)} persons | Avg: {statistics.mean(clean_times):.4f}s")
 
 # Build user_list with deduplication
-user_list = []
+user_list: List[Dict[str, Any]] = []
 personCounter = 0
 duplicate_counter = 0
-seen = set()
+seen: set[tuple] = set()
 
 # Instructors
 for data in instructor_data:
@@ -449,7 +445,6 @@ for data in instructor_data:
     banner_id = get_banner_id(person)
     if not banner_id:
         continue
-
     banner_username = get_banner_username(person)
     first_name = person.get('names', [{}])[0].get('firstName', '')
     if isinstance(first_name, str):
@@ -460,7 +455,7 @@ for data in instructor_data:
     key = (banner_id, "professor", data['course_code'], data['term_code'])
     if key in seen:
         duplicate_counter += 1
-        logger.debug(f"Skipped duplicate instructor {banner_id} in {data['course_code']}")
+        logger.debug(f"Skipped duplicate instructor {banner_id}")
         continue
     seen.add(key)
 
@@ -493,7 +488,6 @@ for data in enrollment_data:
     banner_id = get_banner_id(person)
     if not banner_id:
         continue
-
     banner_username = get_banner_username(person)
     first_name = person.get('names', [{}])[0].get('firstName', '')
     if isinstance(first_name, str):
@@ -504,7 +498,7 @@ for data in enrollment_data:
     key = (banner_id, "student", data['course_code'], data['term_code'])
     if key in seen:
         duplicate_counter += 1
-        logger.debug(f"Skipped duplicate student {banner_id} in {data['course_code']}")
+        logger.debug(f"Skipped duplicate student {banner_id}")
         continue
     seen.add(key)
 
@@ -539,18 +533,22 @@ try:
     logger.info(f"Created user CSV: {user_file_path.name}")
 except Exception as e:
     logger.error("Failed to create user CSV", exc_info=True)
+    user_file_path = None
 
 # SFTP Upload
 logger.info("Starting SFTP uploads")
 try:
-    send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
-    send_file_via_sftp(course_file_path, f"TEST/course/{course_file_path.name}")
-    send_file_via_sftp(user_file_path, f"TEST/user/{user_file_path.name}")
+    if terms_file_path:
+        send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
+    if course_file_path:
+        send_file_via_sftp(course_file_path, f"TEST/course/{course_file_path.name}")
+    if user_file_path:
+        send_file_via_sftp(user_file_path, f"TEST/user/{user_file_path.name}")
     logger.info("All files uploaded successfully")
 except Exception as e:
-    logger.error("One or more SFTP uploads failed", exc_info=True)
+    logger.error("SFTP upload failed", exc_info=True)
 
-# Final Summary
+# Final summary
 end_time = time.monotonic()
 elapsed = end_time - start_time
 logger.info("=== Akademos SIS Export Completed Successfully ===", extra={
