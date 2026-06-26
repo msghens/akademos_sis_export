@@ -305,7 +305,8 @@ for code, details in terms.items():
             "course_title": sections_dict.get('title', '').strip()[:100],
             "course_name": subject_dict.get('abbreviation', '').strip()[:60],
             "course_code": course_dict.get('number', '').strip()[:60],
-            "course_section": sections_dict.get('number', '').strip()[:60],
+            # NEW: course_section = course_number . term_code
+            "course_section": f"{sections_dict.get('code', '').strip()}.{code}".strip()[:60],
             "course_credit": str(course_credit)[:3] if course_credit else "0",
             "course_model": None,
             "department_code": subject_dict.get('abbreviation', '').strip()[:20],
