@@ -7,6 +7,7 @@ import socket
 import statistics
 import sys
 import time
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -66,9 +67,11 @@ start_time = time.monotonic()
 logger.info("=== Starting Akademos SIS Export ===")
 logger.info(f"Python version: {sys.version.split()[0]}")
 
+# Caches
 courseCache: Dict[str, dict] = {}
 subjectCache: Dict[str, dict] = {}
 personCache: Dict[str, dict] = {}
+SectionRecord = namedtuple('SectionRecord', ['section_obj', 'term_code', 'term_desc'])
 
 ethosBaseURL = os.environ["ETHOSBASEURL"]
 ethosAppAPIKey = os.environ["MSGETHOSDEVAPIKEY"]
@@ -108,7 +111,7 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     sftp_password: Optional[str] = os.getenv("SFTPPASSWORD")
 
     if not sftp_server or not sftp_username or not sftp_password:
-        logger.error("Missing SFTP environment variables")
+        logger.error("Missing required SFTP environment variables (SFTPSERVER, SFTPUSERNAME, SFTPPASSWORD)")
         raise ValueError("Missing SFTP credentials")
 
     ssh_client = None
@@ -117,8 +120,9 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
         logger.info(f"Connecting to SFTP server {sftp_server}:{sftp_port}")
         ssh_client = paramiko.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
         ssh_client.connect(
-            hostname=sftp_server,
+            hostname=sftp_server,           # Now guaranteed to be str (thanks to the check above)
             port=sftp_port,
             username=sftp_username,
             password=sftp_password,
@@ -126,9 +130,17 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
             allow_agent=False,
             look_for_keys=False
         )
+        
         sftp = ssh_client.open_sftp()
         sftp.put(str(local_file_path), remote_file_path)
-        logger.info(f"Successfully uploaded {local_file_path.name}")
+        logger.info(f"Successfully uploaded {local_file_path.name} to {remote_file_path}")
+        
+    except paramiko.AuthenticationException:
+        logger.error("SFTP Authentication failed - check credentials", exc_info=True)
+        raise
+    except paramiko.SSHException as e:
+        logger.error(f"SSH error: {e}", exc_info=True)
+        raise
     except Exception as e:
         logger.error(f"SFTP upload failed", exc_info=True)
         raise
@@ -155,18 +167,20 @@ def format_runtime(seconds: float) -> str:
 def get_start_date() -> str:
     current = datetime.datetime.now(datetime.timezone.utc)
     six_months_ago = current - relativedelta(months=6)
-    return six_months_ago.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return six_months_ago.replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + 'Z'
 
 
 def get_end_date() -> str:
     current = datetime.datetime.now(datetime.timezone.utc)
     two_months_later = current + relativedelta(months=2)
-    return two_months_later.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return two_months_later.replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + 'Z'
 
 
 def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str) -> Path:
     if not data_list:
-        raise ValueError("Input data_list cannot be empty.")
+        logger.warning(f"No data for {file_prefix} CSV")
+        # Return empty file or raise — your choice
+        raise ValueError(f"Input data_list for {file_prefix} cannot be empty.")
 
     fieldnames = list(data_list[0].keys())
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -181,6 +195,7 @@ def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str)
         writer.writeheader()
         writer.writerows(data_list)
 
+    logger.info(f"Created {file_prefix} CSV with {len(data_list):,} rows: {output_file_path.name}")
     return output_file_path
 
 
@@ -198,7 +213,7 @@ def get_course(course_id: str) -> dict:
     if course_id in courseCache:
         return courseCache[course_id]
     course = ethosClient.getResource(loginSession=loginSession, resourceName="courses", resourceID=course_id)
-    result: dict = course.dict if course and course.dict is not None else {}
+    result: dict = course.dict if course and hasattr(course, 'dict') and course.dict else {}
     courseCache[course_id] = result
     return result
 
@@ -207,7 +222,7 @@ def get_subject(subject_id: str) -> dict:
     if subject_id in subjectCache:
         return subjectCache[subject_id]
     subject = ethosClient.getResource(loginSession=loginSession, resourceName="subjects", resourceID=subject_id)
-    result: dict = subject.dict if subject and subject.dict is not None else {}
+    result: dict = subject.dict if subject and hasattr(subject, 'dict') and subject.dict else {}
     subjectCache[subject_id] = result
     return result
 
@@ -216,7 +231,7 @@ def get_person(person_id: str) -> dict:
     if person_id in personCache:
         return personCache[person_id]
     person = ethosClient.getResource(loginSession=loginSession, resourceName="persons", resourceID=person_id)
-    result: dict = person.dict if person and person.dict is not None else {}
+    result: dict = person.dict if person and hasattr(person, 'dict') and person.dict else {}
     if result:
         personCache[person_id] = result
     return result
@@ -246,35 +261,30 @@ academicPeriodIterator = ethosClient.getResourceIterator(
 
 terms: Dict[str, Dict[str, Any]] = {}
 for period in academicPeriodIterator:
-    period_dict = period.dict
-    if period_dict:
+    period_dict = period.dict if hasattr(period, 'dict') else {}
+    if period_dict and period_dict.get('code'):
         terms[period_dict['code']] = {
-            "startOn": period_dict['startOn'],
-            "endOn": period_dict['endOn'],
-            "registration": period_dict['registration'],
-            "id": period_dict['id'],
-            "title": period_dict['title']
+            "startOn": period_dict.get('startOn'),
+            "endOn": period_dict.get('endOn'),
+            "registration": period_dict.get('registration'),
+            "id": period_dict.get('id'),
+            "title": period_dict.get('title')
         }
 
 term_list: List[Dict[str, str]] = [
     {
         "term_code": code.strip()[:20],
-        "start_date": details["startOn"].split('T')[0],
-        "end_date": details["endOn"].split('T')[0]
+        "start_date": details["startOn"].split('T')[0] if details.get("startOn") else "",
+        "end_date": details["endOn"].split('T')[0] if details.get("endOn") else ""
     }
     for code, details in terms.items()
 ]
 term_list.sort(key=lambda x: x["start_date"])
 
-try:
-    terms_file_path = create_csv_from_dict_list(term_list, "terms")
-    logger.info(f"Created terms CSV: {terms_file_path.name}")
-except Exception as e:
-    logger.error("Failed to create terms CSV", exc_info=True)
-    terms_file_path = None
+terms_file_path = create_csv_from_dict_list(term_list, "terms")
 
-# Sections
-sections_raw_list: List = []
+# ====================== SECTIONS ======================
+sections_raw_list: List[SectionRecord] = []   # Changed to typed records
 sections_list: List[Dict[str, Any]] = []
 number_of_sections = 0
 
@@ -282,54 +292,58 @@ logger.info(f"Fetching sections for {len(terms)} terms")
 
 for code, details in terms.items():
     params["criteria"] = f'{{"academicPeriod":{{"id":"{details["id"]}"}},"status":"open"}}'
+    
     sectionsIterator = ethosClient.getResourceIterator(
         loginSession=loginSession, resourceName="sections", params=params, pageSize=500
     )
+    
     for section in sectionsIterator:
-        if not section.dict:
+        section_dict = section.dict if hasattr(section, 'dict') and section.dict else {}
+        if not section_dict:
             continue
-        course_dict = get_course(section.dict['course']['id'])
+
+        course_dict = get_course(section_dict.get('course', {}).get('id'))
         if not course_dict or "NC" in course_dict.get('number', ''):
             continue
 
-        sections_raw_list.append(section)
-        sections_dict = section.dict
-        subject_dict = get_subject(course_dict['subject']['id'])
+        subject_dict = get_subject(course_dict.get('subject', {}).get('id'))
+
         course_credit = find_greater(
             course_dict.get('credits', [{}])[0].get('minimum'),
             course_dict.get('credits', [{}])[0].get('maximum')
         )
 
         sections_list.append({
-            "course_number": sections_dict.get('code', '').strip()[:100],
-            "course_title": sections_dict.get('title', '').strip()[:100],
+            "course_number": section_dict.get('code', '').strip()[:100],
+            "course_title": section_dict.get('title', '').strip()[:100],
             "course_name": subject_dict.get('abbreviation', '').strip()[:60],
             "course_code": course_dict.get('number', '').strip()[:60],
-            # NEW: course_section = course_number . term_code
-            "course_section": f"{sections_dict.get('code', '').strip()}.{code}".strip()[:60],
-            "course_credit": str(course_credit)[:3] if course_credit else "0",
+            "course_section": f"{section_dict.get('code', '').strip()}.{code}".strip()[:60],
+            "course_credit": str(course_credit)[:3] if course_credit is not None else "0",
             "course_model": None,
             "department_code": subject_dict.get('abbreviation', '').strip()[:20],
             "department_desc": subject_dict.get('title', '').strip()[:150],
             "campus_code": None,
             "campus_desc": None,
             "term_code": code.strip()[:20],
-            "term_desc": terms[code]["title"].strip()[:150],
+            "term_desc": details.get("title", "").strip()[:150],
             "session_code": None,
-            "start_date": sections_dict.get("startOn", "").split('T')[0],
-            "end_date": sections_dict.get("endOn", "").split('T')[0],
-            "enrollment_cap": int(str(sections_dict.get('maxEnrollment', 0))[:4])
+            "start_date": section_dict.get("startOn", "").split('T')[0] if section_dict.get("startOn") else "",
+            "end_date": section_dict.get("endOn", "").split('T')[0] if section_dict.get("endOn") else "",
+            "enrollment_cap": int(str(section_dict.get('maxEnrollment', 0))[:4])
         })
+
+        # Store with term context for collection phase
+        sections_raw_list.append(SectionRecord(
+            section_obj=section,
+            term_code=code.strip(),
+            term_desc=details.get("title", "").strip()[:150]
+        ))
+        
         number_of_sections += 1
 
-try:
-    course_file_path = create_csv_from_dict_list(sections_list, "course")
-    logger.info(f"Created course CSV: {course_file_path.name}")
-except Exception as e:
-    logger.error("Failed to create course CSV", exc_info=True)
-    course_file_path = None
-
-logger.info(f"Total sections processed: {number_of_sections}")
+course_file_path = create_csv_from_dict_list(sections_list, "course")
+logger.info(f"Total sections processed: {number_of_sections:,}")
 
 # ====================== COLLECTION PHASE ======================
 logger.info("Collecting instructor and student records")
@@ -341,54 +355,70 @@ enrollment_data: List[Dict[str, Any]] = []
 collection_interval = int(os.getenv("COLLECTION_PROGRESS_INTERVAL", 50))
 section_count = 0
 
-for sections in sections_raw_list:
-    sections_dict = sections.dict
-    if not sections_dict:
+for record in sections_raw_list:          # Now using our enriched records
+    section_dict = record.section_obj.dict if hasattr(record.section_obj, 'dict') else {}
+    if not section_dict:
         continue
 
-    term_code = sections_dict.get('term_code')
-    course_code = sections_dict.get('code', '').strip()[:100]
-    term_desc = terms.get(term_code, {}).get("title", "").strip()[:150]
+    course_code = section_dict.get('code', '').strip()[:100]
+    term_code = record.term_code
+    term_desc = record.term_desc
 
-    params["criteria"] = f'{{"section":{{"id":"{sections_dict.get("guid")}"}}}}'
+    # Use 'id' (preferred) or fallback to 'guid'
+    section_id = section_dict.get('id') or section_dict.get('guid')
+    if not section_id:
+        logger.warning(f"Section missing id/guid: {course_code}")
+        continue
 
-    # Instructors - FIXED
+    params["criteria"] = f'{{"section":{{"id":"{section_id}"}}}}'
+
+    # Instructors
     for instructor in ethosClient.getResourceIterator(
-            loginSession=loginSession, resourceName="section-instructors", version="10", params=params):
-        instructor_dict = instructor.dict
-        if instructor_dict is None:
+            loginSession=loginSession, 
+            resourceName="section-instructors", 
+            version="10", 
+            params=params):
+        instr_dict = instructor.dict if hasattr(instructor, 'dict') else {}
+        if not instr_dict:
             continue
-        pid = instructor_dict.get('instructor', {}).get('id')
+        pid = instr_dict.get('instructor', {}).get('id')
         if pid:
             all_person_ids.add(pid)
             instructor_data.append({
-                'person_id': pid, 'course_code': course_code,
-                'term_code': term_code, 'term_desc': term_desc
+                'person_id': pid,
+                'course_code': course_code,
+                'term_code': term_code,
+                'term_desc': term_desc
             })
 
-    # Students - FIXED
+    # Students
     for enrollment in ethosClient.getResourceIterator(
-            loginSession=loginSession, resourceName="section-registrations", version="16", params=params):
-        enrollment_dict = enrollment.dict
-        if enrollment_dict is None:
+            loginSession=loginSession, 
+            resourceName="section-registrations", 
+            version="16", 
+            params=params):
+        enr_dict = enrollment.dict if hasattr(enrollment, 'dict') else {}
+        if not enr_dict:
             continue
-        if enrollment_dict.get('status', {}).get('registrationStatus') != "registered":
+        if enr_dict.get('status', {}).get('registrationStatus') != "registered":
             continue
-        pid = enrollment_dict.get('registrant', {}).get('id')
+        pid = enr_dict.get('registrant', {}).get('id')
         if pid:
             all_person_ids.add(pid)
             enrollment_data.append({
-                'person_id': pid, 'course_code': course_code,
-                'term_code': term_code, 'term_desc': term_desc
+                'person_id': pid,
+                'course_code': course_code,
+                'term_code': term_code,
+                'term_desc': term_desc
             })
 
     section_count += 1
     if section_count % collection_interval == 0:
-        logger.info(f"Collection progress: {section_count}/{len(sections_raw_list)} sections | "
-                    f"{len(all_person_ids)} unique persons found")
+        logger.info(f"Collection progress: {section_count:,}/{len(sections_raw_list):,} sections | "
+                    f"{len(all_person_ids):,} unique persons found")
 
 total_persons = len(all_person_ids)
-logger.info(f"Collection completed - Found {total_persons} unique persons")
+logger.info(f"Collection completed - Found {total_persons:,} unique persons")
 
 # ====================== CONCURRENT FETCH ======================
 max_workers = int(os.getenv("PERSON_FETCH_WORKERS", 25))
