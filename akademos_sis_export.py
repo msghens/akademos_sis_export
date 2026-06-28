@@ -458,7 +458,9 @@ with ThreadPoolExecutor(max_workers=max_workers) as executor:
 # Person statistics
 if person_times:
     logger.info("=== Person API Call Statistics ===")
-    clean_times = remove_outliers_modified_z(person_times)
+    # Remove outliers using modified Z-score method
+    # clean_times = remove_outliers_modified_z(person_times)
+    clean_times = person_times  # For now, we keep all times; uncomment above line to remove outliers
     if clean_times:
         logger.info(f"Processed {len(clean_times)} persons | Avg: {statistics.mean(clean_times):.4f}s")
         logger.info(f"Min: {min(clean_times):.4f}s | Max: {max(clean_times):.4f}s | Median: {statistics.median(clean_times):.4f}s")
