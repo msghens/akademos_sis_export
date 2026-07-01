@@ -99,7 +99,7 @@ def remove_outliers_modified_z(data: List, threshold: float = 3.5) -> List[float
     modified_z_scores = [0.6745 * (x - median_val) / mad for x in data]
     return [x for x, mz in zip(data, modified_z_scores) if abs(mz) <= threshold]
 
-
+#====================== SFTP UPLOAD ======================
 def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
     if not local_file_path.exists():
         logger.error(f"Local file not found: {local_file_path}")
@@ -151,6 +151,7 @@ def send_file_via_sftp(local_file_path: Path, remote_file_path: str) -> None:
             ssh_client.close()
 
 
+# Humanize runtime for logging
 def format_runtime(seconds: float) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
@@ -163,7 +164,7 @@ def format_runtime(seconds: float) -> str:
     if millis and not hours: parts.append(f"{millis}ms")
     return " ".join(parts) or "0s"
 
-
+# Accademic periods for the last 6 months and next 2 months Not used in the current implementation but can be useful for future filtering
 def get_start_date() -> str:
     current = datetime.datetime.now(datetime.timezone.utc)
     six_months_ago = current - relativedelta(months=6)
@@ -175,7 +176,7 @@ def get_end_date() -> str:
     two_months_later = current + relativedelta(months=2)
     return two_months_later.replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + 'Z'
 
-
+#
 def create_csv_from_dict_list(data_list: List[Dict[str, Any]], file_prefix: str) -> Path:
     if not data_list:
         logger.warning(f"No data for {file_prefix} CSV")
@@ -237,13 +238,14 @@ def get_person(person_id: str) -> dict:
     return result
 
 
+# Extract spriden_id (Banner ID)
 def get_banner_id(person: dict) -> str:
     for credential in person.get('credentials', []):
         if credential.get('type') == 'bannerId':
             return credential.get('value', '').strip()[:50]
     return ""
 
-
+# Extract gobtpac_external_username (Banner Username)
 def get_banner_username(person: dict) -> str:
     for credential in person.get('credentials', []):
         if credential.get('type') == 'bannerUserName':
