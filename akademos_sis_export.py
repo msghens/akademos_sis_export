@@ -321,7 +321,7 @@ for code, details in terms.items():
             "course_name": subject_dict.get('abbreviation', '').strip()[:60],
             "course_code": course_dict.get('number', '').strip()[:60],
             "course_section": section_dict.get('code', '').strip()[:60],
-            "course_credit": str(course_credit)[:3] if course_credit is not None else "0",
+            "course_credits": str(course_credit)[:3] if course_credit is not None else "0",
             "course_model": None,
             "department_code": subject_dict.get('abbreviation', '').strip()[:20],
             "department_desc": subject_dict.get('title', '').strip()[:150],
@@ -578,11 +578,10 @@ except Exception as e:
 logger.info("Starting SFTP uploads")
 try:
     if terms_file_path:
-        send_file_via_sftp(terms_file_path, f"TEST/term/{terms_file_path.name}")
+        send_file_via_sftp(terms_file_path, f"PROD/term/{terms_file_path.name}")
     if course_file_path:
-        send_file_via_sftp(course_file_path, f"TEST/course/{course_file_path.name}")
+        send_file_via_sftp(course_file_path, f"PROD/course/{course_file_path.name}")
     if user_file_path:
-        send_file_via_sftp(user_file_path, f"TEST/user/{user_file_path.name}")
     logger.info("All files uploaded successfully")
 except Exception as e:
     logger.error("SFTP upload failed", exc_info=True)
