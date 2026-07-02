@@ -14,105 +14,137 @@ Python script to extract Banner SIS data to export to Akademos/Vitalsource
 
 ***
 
-# 🎓 Akademos SIS Data Export Pipeline
+# 🎓 Akademos SIS Data Export Tool
 
-A robust Python utility designed to extract core academic data (Terms, Sections, Instructors, Students) from an Ellucian Ethos API endpoint, process it locally, deduplicate records, and securely upload the resulting structured CSV files via SFTP.
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python Version](https://img.shields.io/badge/Python-3.10%2B-green.svg)]()
+[![Status](https://img.shields.io/badge/Status-Complete-brightgreen.svg)]()
 
-This pipeline ensures that all necessary related person details are fetched efficiently using concurrent processing for maximum performance.
+This repository contains a robust Python script designed to extract, process, and synchronize academic student information system (SIS) data from an **Ellucian Ethos** instance into structured CSV files, which are then securely uploaded via **SFTP**.
+
+The primary goal of this tool is to generate unified user lists for integration with downstream systems like Akademos.
 
 ## ✨ Features
 
-*   **API Integration:** Connects to Ellucian Ethos API using OAuth/API Key authentication.
-*   **Data Enrichment:** Fetches and links data from multiple resources (`academic-periods`, `sections`, `courses`, `subjects`, `section-instructors`, `section-registrations`).
-*   **Concurrency:** Utilizes `concurrent.futures` (ThreadPoolExecutor) to fetch detailed person records in parallel, significantly reducing execution time for large datasets.
-*   **Data Cleaning & Modeling:** Implements functions like outlier detection (`remove_outliers_modified_z`) and sophisticated deduplication logic based on key identifiers (e.g., `bannerId`, role).
-*   **Robust Logging:** Includes a detailed logging setup writing to both standard output and rotating log files, ensuring auditability.
-*   **Secure Transfer:** Uploads final structured data files via SFTP using the `paramiko` library.
+*   **Ellucian Ethos API Integration:** Connects directly to the SIS using API keys and session management (`EllucianEthosPythonClient`).
+*   **Comprehensive Data Fetching:** Retrieves academic terms, course sections, registered students, and instructors in a defined workflow.
+*   **Performance Optimization:** Utilizes `ThreadPoolExecutor` for concurrent fetching of person records, significantly reducing execution time.
+*   **Data Cleaning & Deduplication:** Implements logic to extract Banner IDs (`bannerId`) and usernames (`bannerUserName`), deduplicate entries (based on ID/Role/Course/Term), and clean personal data fields.
+*   **Robust Logging:** Includes detailed logging setup to both the console and a rotating file (`logs/akademos_sis_export.log`).
+*   **Secure Transfer:** Handles secure file transfer using `paramiko` for uploading compiled CSV files via SFTP.
 
-## 🛠️ Prerequisites & Setup
+## 🚀 Getting Started
 
-### Python Requirements
+### Prerequisites
 
-This project requires Python 3.8+ and the following libraries:
+Before running the script, ensure you have:
 
-```bash
-pip install pandas paramiko python-dotenv dateutil ethos-client # (Assuming EllucianEthosPythonClient is packaged or available)
-# Note: If 'EllucianEthosPythonClient' is a local package, ensure it is installed/accessible in your PYTHONPATH.
+1.  **Python:** Python 3.8+ is recommended (The current requirement in `pyproject.toml` is `>=3.14`, but stick to a recent stable version for compatibility unless testing explicitly on 3.14).
+2.  **Ellucian Ethos API Access:** Valid base URL and Developer API Key.
+3.  **SFTP Credentials:** Host, port, username, and password for the target SFTP server.
+
+### Installation
+
+1.  **Clone the Repository:**
+    ```bash
+    git clone [repository-url]
+    cd akademos-sis-export
+    ```
+
+2.  **Install Dependencies:**
+    The required libraries are defined in `pyproject.toml`. You can install them using a modern Python package manager:
+
+    ```bash
+    pip install -r requirements.txt # Or use poetry/pipenv based on your setup
+    # Based on pyproject.toml, running this might be sufficient for basic dependencies:
+    pip install ellucianethospythonclient paramiko python-dateutil python-dotenv statistics
+    ```
+
+### Environment Configuration
+
+The script relies heavily on environment variables configured in a `.env` file. Create a file named **`.env`** in the project root and populate it with your credentials:
+
+***Example Structure (using data from `env.example`):***
+
+```ini
+# ====================== AKADEMOS SIS EXPORT ======================
+
+# Ethos API Configuration
+ETHOSBASEURL=https://your-ethos-instance.ellucian.cloud
+MSGETHOSDEVAPIKEY=your-ethos-api-key-here
+
+# SFTP Configuration (for uploading to Akademos)
+SFTPSERVER=your.sftp.server.com
+SFTPPORT=22
+SFTPUSERNAME=your_sftp_username
+SFTPPASSWORD=your_sftp_password
+
+# Logging Configuration
+LOG_LEVEL_CONSOLE=INFO    # Options: DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL_FILE=DEBUG      # Options: DEBUG, INFO, WARNING, ERROR
+
+# Performance / Concurrency (Adjust these based on network stability and required speed)
+PERSON_FETCH_WORKERS=25   # Number of concurrent threads for fetching person details
+PERSON_PROGRESS_INTERVAL=100 # Log progress every N persons fetched
+COLLECTION_PROGRESS_INTERVAL=50 # Log collection progress every N sections processed
+
+# Optional (Placeholder)
+ENVIRONMENT=development
 ```
 
-### Environment Variables
+## 🛠️ Usage
 
-The script relies heavily on environment variables for secure configuration. You must create a `.env` file (or set these variables directly in your execution environment) containing the following keys:
-
-| Variable | Purpose | Example Value | Required? | Notes |
-| :--- | :--- | :--- | :--- | :--- |
-| `ETHOSBASEURL` | Base URL for the Ethos API. | `https://ethos-dev.example.edu/api` | Yes | |
-| `MSGETHOSDEVAPIKEY` | API Key for authenticating with Ethos. | `your_secret_api_key` | Yes | Used to generate the login session. |
-| `SFTPSERVER` | Hostname of the SFTP server. | `sftp.example.edu` | Yes | |
-| `SFTPUSERNAME` | Username for SFTP access. | `user_export` | Yes | |
-| `SFTPPASSWORD` | Password for SFTP access. | `securepassword123` | Yes | Consider using SSH keys instead of passwords for production. |
-
-### Optional Variables (Tuning)
-
-You can optimize the script's behavior by setting these optional variables:
-
-*   `LOG_LEVEL_CONSOLE`: Sets logging level for console output (`INFO`, `DEBUG`).
-*   `LOG_LEVEL_FILE`: Sets logging level for file output (`DEBUG`, `WARNING`).
-*   `PERSON_FETCH_WORKERS`: Number of threads to use for concurrent person fetching (Default: 25).
-*   `COLLECTION_PROGRESS_INTERVAL`: How often to log progress during section processing.
-
-## 🚀 Usage
-
-### Running the Script
-
-Execute the script from your terminal after setting up the environment variables:
+Execute the main script:
 
 ```bash
-python path/to/your_script_name.py
+python akademos_sis_export.py
 ```
 
-### Output Files
+### Execution Flow
 
-Upon successful execution, the following structured CSV files will be created in a local `data/` directory and then uploaded to the SFTP server (`TEST/`).
+The script performs the following sequence of actions:
 
-1.  **`terms_[timestamp].csv`**: List of active academic terms.
-    *   *Columns:* `term_code`, `start_date`, `end_date`.
-2.  **`course_[timestamp].csv`**: Detailed list of all sections available across all terms.
-    *   *Columns:* `course_number`, `course_title`, `department_code`, `term_code`, `enrollment_cap`, etc.
-3.  **`user_[timestamp].csv`**: The final, deduplicated user roster containing both students and instructors associated with the courses/terms.
-    *   *Columns:* Includes detailed fields like `id` (Banner ID), `role` (`student`/`professor`), `first_name`, `last_name`, `email`, etc.
+1.  **Initialization:** Sets up logging and initializes the connection to the Ethos API.
+2.  **Term Extraction (Terms):** Fetches all active academic periods (`terms`) and saves them as `data/terms_*.csv`.
+3.  **Section Extraction (Course):** Iterates through each term, fetching associated sections. It enriches each section with details from the connected course and subject records. These are saved as `data/course_*.csv`.
+4.  **Collection Phase:**
+    *   For every processed section, it queries for all **instructors** (`section-instructors`) and **registered students** (`section-registrations`).
+    *   All unique Person IDs (PIDs) found are collected into a set.
+5.  **Concurrent Fetch (Persons):** Uses multi-threading to concurrently fetch detailed profile data (name, address, credentials like Banner ID) for all unique PIDs from the Ethos API. This is the most time-consuming step and benefits greatly from parallelization.
+6.  **Data Aggregation & Deduplication:** Merges the collected personal data with section enrollment records, generating a final list of standardized users (`user_list`). Deduplicates records based on a unique combination of `(Banner ID, Role, Course Code, Term Code)`.
+7.  **Final Output (User):** Creates the master user CSV file: `data/user_*.csv`.
+8.  **SFTP Upload:** Uploads all generated files (`terms`, `course`, `user`) to the remote SFTP server in a predefined path structure, logging success or failure for each upload.
 
-## ⚙️ Technical Workflow Deep Dive
+## 📂 Output Structure
 
-The pipeline follows a multi-stage process:
+Upon successful execution, the following artifacts are created:
 
-1.  **Initialization & Connection:**
-    *   A detailed logger is initialized for tracking execution flow and errors.
-    *   Ethos client connects to the API using environment credentials and retrieves the session token.
-2.  **Phase 1: Fetching Academic Context (Terms $\to$ Sections):**
-    *   The script first fetches all active academic periods (`academic-periods`).
-    *   It then iterates through these terms, fetching all associated sections (`sections`) for each term that is open for registration.
-3.  **Phase 2: Collection and Identification:**
-    *   For every section found, the pipeline retrieves necessary related metadata (Course details, Subject department).
-    *   Crucially, it uses secondary API calls to identify *all* associated person IDs (`pid`) linked to that section via `section-instructors` and `section-registrations`. These PIDs are collected into a master set.
-4.  **Phase 3: Concurrent Person Fetching (The Bottleneck):**
-    *   Instead of fetching person details sequentially, the script distributes all unique PIDs across a thread pool (`ThreadPoolExecutor`). This maximizes API throughput and minimizes wait time.
-5.  **Phase 4: Data Modeling and Deduplication:**
-    *   The raw instructor and enrollment records are processed into two lists (Instructors and Students).
-    *   A final deduplication pass runs, ensuring that the `user_list` only contains one entry per unique person/role combination for a specific course/term key, preventing redundant data.
-6.  **Phase 5: Export & Distribution:**
-    *   The structured lists are converted into CSV format using Python's built-in `csv` module.
-    *   Finally, the generated files are uploaded to the remote SFTP server for downstream consumption.
+### Local Files (in `./data/` directory)
+| Filename Pattern | Description | Content Type |
+| :--- | :--- | :--- |
+| `terms_[timestamp].csv` | List of all active academic terms. | CSV |
+| `course_[timestamp].csv` | Master list of sections, linking courses and departments to specific terms. | CSV |
+| `user_[timestamp].csv` | **The primary output.** Consolidated user records for both students (`role: student`) and instructors (`role: professor`), formatted for the target system. | CSV |
 
-## 📚 Discussion Points
+### Remote SFTP Uploads
+The following files are uploaded to the designated path structure on your remote server:
 
-### Algorithmic Efficiency (Time Complexity)
+*   **`/PROD/term/{terms_file_name}`:** The term list file.
+*   **`/PROD/course/{course_file_name}`:** The course/section master file.
+*   **`/PROD/user/{user_file_name}`:** The final, processed user record file.
 
-The most critical part of this script is **Phase 3: Concurrent Person Fetching**. If $N$ is the total number of unique persons and $T$ is the time taken for a single API call to `get_person`, running sequentially would take $O(N \cdot T)$. By using $W$ workers (where $W$ is `max_workers`), the theoretical complexity approaches $O(\frac{N}{W} \cdot T)$, resulting in massive performance gains.
+## ⚠️ Error Handling & Logging
 
-### Scalability Concerns
+The script includes extensive error handling for:
+*   Missing environment variables (SFTP credentials).
+*   API connection failures.
+*   Data processing errors (e.g., non-numeric input where numbers are expected).
 
-1.  **API Rate Limiting:** Given the intensive nature of API calls, high-volume runs must be monitored for rate limits imposed by the Ethos API provider.
-2.  **Memory Usage:** If the dataset (number of sections/persons) is extremely large (hundreds of thousands), collecting all `sections_list`, `instructor_data`, and `enrollment_data` into memory before processing could lead to memory exhaustion. For enterprise-scale data, consider implementing a database persistence layer instead of in-memory lists.
+All activity is logged to the console and, more verbosely, to `logs/akademos_sis_export.log`.
 
----
+### Advanced Logging Options
+
+You can adjust logging verbosity in your `.env` file:
+*   **`LOG_LEVEL_CONSOLE`**: Set to `DEBUG` to see every API request detail, or `INFO` for general execution milestones.
+*   **`LOG_LEVEL_FILE`**: Controls the log file's level (defaulting to `DEBUG`).
+
