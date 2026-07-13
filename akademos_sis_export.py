@@ -191,20 +191,20 @@ def find_greater(a: Optional[Union[int, float]], b: Optional[Union[int, float]])
     return max(a, b)
 
 
-# ====================== CACHED ETHOS HELPERS ======================
-@cache.memoize(expire=CACHE_EXPIRE_SECONDS)
+# ====================== CACHED ETHOS HELPERS (with tags) ======================
+@cache.memoize(expire=CACHE_EXPIRE_SECONDS, tag='courses')
 def get_course(course_id: str) -> dict:
     course = ethosClient.getResource(loginSession=loginSession, resourceName="courses", resourceID=course_id)
     return course.dict if course and hasattr(course, 'dict') and course.dict else {}
 
 
-@cache.memoize(expire=CACHE_EXPIRE_SECONDS)
+@cache.memoize(expire=CACHE_EXPIRE_SECONDS, tag='subjects')
 def get_subject(subject_id: str) -> dict:
     subject = ethosClient.getResource(loginSession=loginSession, resourceName="subjects", resourceID=subject_id)
     return subject.dict if subject and hasattr(subject, 'dict') and subject.dict else {}
 
 
-@cache.memoize(expire=CACHE_EXPIRE_SECONDS)
+@cache.memoize(expire=CACHE_EXPIRE_SECONDS, tag='persons')
 def get_person(person_id: str) -> dict:
     person = ethosClient.getResource(loginSession=loginSession, resourceName="persons", resourceID=person_id)
     return person.dict if person and hasattr(person, 'dict') and person.dict else {}
@@ -222,7 +222,6 @@ def get_banner_username(person: dict) -> str:
         if credential.get('type') == 'bannerUserName':
             return credential.get('value', '').strip()[:50]
     return ""
-
 
 # ====================== MAIN EXECUTION ======================
 params: Dict[str, str] = {"criteria": '{"category":{"type":"term"},"registration":"open"}'}
@@ -529,36 +528,12 @@ try:
     logger.info(f"Cache size on disk: {cache.volume() / (1024 * 1024):.1f} MB")
     
     try:
-        try:
-            num_keys = len(cache) # type: ignore
-        except TypeError:
-            num_keys = -1
+        num_keys: int = len(cache) if hasattr(cache, '__len__') else -1 # type: ignore
         logger.info(f"Cache keys: {num_keys:,}")
     except Exception:
         logger.info("Cache keys: (count unavailable)")
 except Exception as e:
     logger.warning(f"Could not retrieve cache stats: {e}")
-
-# Create user CSV
-try:
-    user_file_path = create_csv_from_dict_list(user_list, "user")
-    logger.info(f"Created user CSV: {user_file_path.name}")
-except Exception as e:
-    logger.error("Failed to create user CSV", exc_info=True)
-    user_file_path = None
-
-# SFTP Upload
-logger.info("Starting SFTP uploads")
-try:
-    if terms_file_path:
-        send_file_via_sftp(terms_file_path, f"PROD/term/{terms_file_path.name}")
-    if course_file_path:
-        send_file_via_sftp(course_file_path, f"PROD/course/{course_file_path.name}")
-    if user_file_path:
-        send_file_via_sftp(user_file_path, f"PROD/user/{user_file_path.name}")
-    logger.info("SFTP uploads completed successfully")
-except Exception as e:
-    logger.error("SFTP upload failed", exc_info=True)
 
 # Final summary
 end_time = time.monotonic()
