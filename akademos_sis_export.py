@@ -520,6 +520,24 @@ logger.info(f"Total persons added after deduplication: {personCounter}")
 if duplicate_counter:
     logger.info(f"Skipped {duplicate_counter} duplicate entries")
 
+user_file_path = create_csv_from_dict_list(user_list, "user")
+logger.info(f"Created user CSV: {user_file_path.name}")
+
+# SFTP Upload
+logger.info("Starting SFTP uploads")
+try:
+    if terms_file_path:
+        send_file_via_sftp(terms_file_path, f"PROD/term/{terms_file_path.name}")
+    if course_file_path:
+        send_file_via_sftp(course_file_path, f"PROD/course/{course_file_path.name}")
+    if user_file_path:
+        logger.info("All files uploaded successfully")
+        send_file_via_sftp(user_file_path, f"PROD/user/{user_file_path.name}")
+    logger.info("SFTP uploads completed successfully")
+except Exception as e:
+    logger.error("SFTP upload failed", exc_info=True)
+
+
 # ====================== CACHE STATS ======================
 try:
     cache.expire()
